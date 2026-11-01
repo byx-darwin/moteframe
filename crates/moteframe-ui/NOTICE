@@ -1,0 +1,14 @@
+MoteFrame (微构)
+Copyright 2026 MoteFrame contributors
+
+Project source: https://github.com/byx-darwin/moteframe
+
+This product includes software developed by the MoteFrame contributors.
+MoteFrame provides portable Rust interfaces, graphics, display transport
+and bus components for small embedded devices.
+
+MoteFrame is licensed under the Apache License, Version 2.0.
+See the accompanying LICENSE file for the license terms.
+
+This notice identifies the origin of the software. It does not imply
+endorsement of a derivative product and does not modify the license.

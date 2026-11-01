@@ -1,0 +1,15 @@
+/target/
+/.superpowers/
+__pycache__/
+*.pyc
+.DS_Store
+.env
+.env.*
+*.lib
+*.a
+*.bin
+*.elf
+*.hex
+*.zip
+*.7z
+*.rar

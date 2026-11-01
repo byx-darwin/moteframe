@@ -1,0 +1,6 @@
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Local build artifacts and Git internal storage are not publication inputs"
+paths = ['^target/', '^\.git/']

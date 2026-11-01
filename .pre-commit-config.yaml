@@ -1,0 +1,46 @@
+fail_fast: false
+default_install_hook_types: [pre-commit, commit-msg]
+default_stages: [pre-commit, manual]
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: fix-byte-order-marker
+      - id: check-case-conflict
+      - id: check-merge-conflict
+      - id: check-symlinks
+      - id: check-yaml
+      - id: check-toml
+      - id: end-of-file-fixer
+      - id: mixed-line-ending
+      - id: trailing-whitespace
+  - repo: local
+    hooks:
+      - id: moteframe-check
+        name: portable host and ARM quality gates
+        entry: make check
+        language: system
+        pass_filenames: false
+        always_run: true
+      - id: cargo-deny
+        name: offline dependency policy
+        entry: make supply-chain
+        language: system
+        files: (Cargo\.toml|Cargo\.lock|deny\.toml)$
+        pass_filenames: false
+      - id: typos
+        name: spelling check
+        entry: typos
+        language: system
+        pass_filenames: false
+      - id: gitleaks
+        name: working tree secret detection
+        entry: make secrets
+        language: system
+        pass_filenames: false
+      - id: conventional-commit
+        name: Conventional Commit subject
+        entry: python3 scripts/commit_message.py
+        language: system
+        stages: [commit-msg]

@@ -1,0 +1,13 @@
+[package]
+name = "moteframe-i2c"
+description = "Bounded open-drain software I2C register reads"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+readme = "README.md"
+
+[lints]
+workspace = true

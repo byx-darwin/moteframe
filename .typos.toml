@@ -1,0 +1,5 @@
+[files]
+extend-exclude = ["target", ".git", "Cargo.lock", "LICENSE-*", "crates/*/LICENSE-*"]
+
+[default]
+extend-ignore-re = ['0x[0-9a-fA-F_]+', '[0-9a-f]{40,64}']

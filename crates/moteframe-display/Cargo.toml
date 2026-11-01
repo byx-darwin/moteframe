@@ -1,0 +1,17 @@
+[package]
+name = "moteframe-display"
+description = "Small-buffer RGB565 display transport with explicit caller-supplied profiles"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+readme = "README.md"
+
+[dependencies]
+moteframe-core.workspace = true
+embedded-hal.workspace = true
+
+[lints]
+workspace = true
