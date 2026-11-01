@@ -44,12 +44,12 @@ and resolved dependencies before exposing the first commit.
 
 ### Task 2: Commit, upload and verify public access
 
-- [ ] Enumerate and review the exact Git candidate list; exclude ignored local
+- [x] Enumerate and review the exact Git candidate list; exclude ignored local
   evidence and private paths. Stage only the approved files and run hooks.
-- [ ] Create the initial Conventional Commit on main and push only that branch
+- [x] Create the initial Conventional Commit on main and push only that branch
   to the existing private empty repository. Expect local/remote commit equality.
-- [ ] Change only the authorized repository to public; verify anonymous access,
+- [x] Change only the authorized repository to public; verify anonymous access,
   source commit, LICENSE, root/crate NOTICE and remote CI status.
-- [ ] Record actual delivery evidence locally and report any remaining limits.
+- [x] Record actual delivery evidence locally and report any remaining limits.
 
 The existing source repository is never staged, committed, pushed or relicensed.

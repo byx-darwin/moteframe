@@ -50,3 +50,8 @@ Plan: `docs/plans/2026-11-02-foundation-extraction.md`.
   hardware remains outside scope. Owner publication authorization is accepted
   without claiming independent legal certification. Remote commit, visibility
   and CI are verified separately after the authorized upload.
+- Task 2 complete: the 68-file initial commit was uploaded to main, repository
+  visibility is PUBLIC, and anonymous root/crate LICENSE/NOTICE requests match
+  the local files. GitHub recognizes Apache-2.0. Initial source CI run
+  `41362033364` passed. No hardware, private source history, registry upload,
+  release or tag is involved.

@@ -98,6 +98,19 @@ are separate from the local results above; see the repository's Actions page and
 the delivery report for the actual run status. Cargo registry publication remains
 disabled. No crates.io upload, release, tag or hardware operation is included.
 
+## Public source delivery
+
+The reviewed 68-file tree was committed as
+`4b4728148fec3ebb220819b595ba66a43c9ab6e4` and uploaded to the repository's `main`
+branch. The repository is public, its default branch is `main`, and GitHub
+recognizes Apache License 2.0. Anonymous requests verified that the root and all
+four crates' LICENSE and NOTICE files match the reviewed local contents.
+
+The initial source commit's [GitHub offline regression](https://github.com/byx-darwin/moteframe/actions/runs/41362033364)
+passed, including host tests, Python checks, package audits and Cortex-M0 release
+library builds. The original selected private source files remain unchanged.
+This document's closeout updates do not change runtime code or dependencies.
+
 This is software extraction/regression evidence, not measured device timing,
 electrical compatibility, power consumption, real stack usage or a hardware
 release qualification. The owner authorized the selected first-party Apache-2.0
