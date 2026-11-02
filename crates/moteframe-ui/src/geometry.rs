@@ -3,7 +3,7 @@
 // See LICENSE and NOTICE for license and source attribution.
 
 use embedded_graphics::{
-    geometry::Point, pixelcolor::Rgb565, prelude::Pixel, primitives::Rectangle,
+    geometry::Point, pixelcolor::PixelColor, prelude::Pixel, primitives::Rectangle,
 };
 use moteframe_core::{Dimensions, Rect};
 
@@ -37,12 +37,12 @@ pub(crate) fn visible(point: Point, dimensions: Dimensions) -> Option<(u16, u16)
     (x < dimensions.width && y < dimensions.height).then_some((x, y))
 }
 
-pub(crate) fn contiguous_pixels<I>(
+pub(crate) fn contiguous_pixels<C: PixelColor, I>(
     area: Rectangle,
     colors: I,
-) -> impl Iterator<Item = Pixel<Rgb565>>
+) -> impl Iterator<Item = Pixel<C>>
 where
-    I: IntoIterator<Item = Rgb565>,
+    I: IntoIterator<Item = C>,
 {
     let width = u64::from(area.size.width);
     let count = width * u64::from(area.size.height);

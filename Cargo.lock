@@ -66,26 +66,27 @@ checksum = "c3c8dda44ff03a2f238717214da50f65d5a53b45cd213a7370424ffdb6fae815"
 
 [[package]]
 name = "moteframe-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "embedded-hal",
 ]
 
 [[package]]
 name = "moteframe-display"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
+ "embedded-graphics-core",
  "embedded-hal",
  "moteframe-core",
 ]
 
 [[package]]
 name = "moteframe-i2c"
-version = "0.1.0"
+version = "0.2.0"
 
 [[package]]
 name = "moteframe-ui"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "embedded-graphics",
  "moteframe-core",

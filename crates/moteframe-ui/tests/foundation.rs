@@ -3,8 +3,10 @@
 // See LICENSE and NOTICE for license and source attribution.
 
 //! Geometry, layout and stream adapter contracts.
+#![cfg(feature = "layout")]
 use graphics::{pixelcolor::Rgb565, prelude::*, primitives::Rectangle};
-use moteframe_core::{Dimensions, Display, Rect, Rgb565 as Packed};
+use moteframe_core::{Dimensions, Display, Rect};
+use moteframe_ui::graphics::pixelcolor::{Rgb565 as Packed, raw::RawU16};
 use moteframe_ui::{Axis, LayoutError, Stack, StreamTarget, clip, graphics};
 
 #[derive(Debug)]
@@ -23,6 +25,7 @@ impl Screen {
     }
 }
 impl Display for Screen {
+    type Color = Packed;
     type Error = &'static str;
     fn dimensions(&self) -> Dimensions {
         self.size
@@ -103,10 +106,25 @@ fn test_should_coalesce_runs_preserve_overwrites_and_clip_pixels() -> Result<(),
     assert_eq!(
         screen.writes,
         vec![
-            (Rect::new(0, 0, 32, 1), vec![Packed(0xf800); 32]),
-            (Rect::new(32, 0, 3, 1), vec![Packed(0xf800); 3]),
-            (Rect::new(2, 1, 2, 1), vec![Packed(0x07e0), Packed(0x001f)]),
-            (Rect::new(2, 1, 1, 1), vec![Packed(0xffff)]),
+            (
+                Rect::new(0, 0, 32, 1),
+                vec![Packed::from(RawU16::new(0xf800)); 32]
+            ),
+            (
+                Rect::new(32, 0, 3, 1),
+                vec![Packed::from(RawU16::new(0xf800)); 3]
+            ),
+            (
+                Rect::new(2, 1, 2, 1),
+                vec![
+                    Packed::from(RawU16::new(0x07e0)),
+                    Packed::from(RawU16::new(0x001f))
+                ]
+            ),
+            (
+                Rect::new(2, 1, 1, 1),
+                vec![Packed::from(RawU16::new(0xffff))]
+            ),
         ]
     );
     Ok(())
@@ -133,8 +151,20 @@ fn test_should_preserve_source_colors_when_contiguous_area_is_clipped() -> Resul
     assert_eq!(
         screen.writes,
         vec![
-            (Rect::new(0, 0, 2, 1), vec![Packed(0xf800), Packed(0x07e0)]),
-            (Rect::new(0, 1, 2, 1), vec![Packed(0x001f), Packed(0xffff)]),
+            (
+                Rect::new(0, 0, 2, 1),
+                vec![
+                    Packed::from(RawU16::new(0xf800)),
+                    Packed::from(RawU16::new(0x07e0))
+                ]
+            ),
+            (
+                Rect::new(0, 1, 2, 1),
+                vec![
+                    Packed::from(RawU16::new(0x001f)),
+                    Packed::from(RawU16::new(0xffff))
+                ]
+            ),
         ]
     );
     Ok(())
@@ -149,7 +179,10 @@ fn test_should_not_invent_pixels_for_short_or_empty_streams() -> Result<(), &'st
     target.fill_contiguous(&area, [Rgb565::RED])?;
     assert_eq!(
         screen.writes,
-        vec![(Rect::new(0, 0, 1, 1), vec![Packed(0xf800)])]
+        vec![(
+            Rect::new(0, 0, 1, 1),
+            vec![Packed::from(RawU16::new(0xf800))]
+        )]
     );
     Ok(())
 }
@@ -164,8 +197,14 @@ fn test_should_fill_clipped_solid_rows_in_bounded_chunks() -> Result<(), &'stati
     assert_eq!(
         screen.writes,
         vec![
-            (Rect::new(0, 1, 32, 1), vec![Packed(0x001f); 32]),
-            (Rect::new(32, 1, 1, 1), vec![Packed(0x001f)]),
+            (
+                Rect::new(0, 1, 32, 1),
+                vec![Packed::from(RawU16::new(0x001f)); 32]
+            ),
+            (
+                Rect::new(32, 1, 1, 1),
+                vec![Packed::from(RawU16::new(0x001f))]
+            ),
         ]
     );
     Ok(())

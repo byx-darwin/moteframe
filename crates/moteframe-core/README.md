@@ -1,9 +1,12 @@
 # moteframe-core
 
-Portable, allocation-free contracts for display geometry, RGB565 pixels,
+Portable, allocation-free contracts for display geometry, associated color types,
 display/board initialization, GPIO outputs, synchronous SPI writes and exact
 offset reads. The `spi` module adapts embedded-hal 1.0 bus/device contracts to a
 single foreground shared owner.
+
+`Display::Color: Copy` does not depend on a graphics library. Pixel encoding
+belongs to the implementing driver. The old RGB565 tuple wrapper is removed in 0.2.
 
 Transactions retain exclusive borrowing through CS assertion, payload, flush
 and attempted CS release. The first failure is preserved and any transfer or

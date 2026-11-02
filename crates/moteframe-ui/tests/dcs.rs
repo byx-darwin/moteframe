@@ -3,6 +3,7 @@
 // See LICENSE and NOTICE for license and source attribution.
 
 //! End-to-end borrowed font to real DCS stream, replacing physical transport only.
+#![cfg(feature = "refresh")]
 use graphics::{
     image::ImageRaw,
     mono_font::{DecorationDimensions, MonoFont, MonoTextStyle},
@@ -11,8 +12,9 @@ use graphics::{
     primitives::Rectangle,
     text::{Baseline, Text},
 };
-use moteframe_core::{DelayMs, Dimensions, DisplayBus, Rgb565 as Packed};
+use moteframe_core::{DelayMs, Dimensions, DisplayBus};
 use moteframe_display::DcsDisplay;
+use moteframe_ui::graphics::pixelcolor::{Rgb565 as Packed, raw::RawU16};
 use moteframe_ui::{DirtyRegion, graphics, repaint};
 
 #[derive(Debug, Default)]
@@ -59,7 +61,7 @@ fn test_should_draw_borrowed_font_through_tiles_to_exact_dcs_windows_and_bytes()
         repaint(
             &mut display,
             &mut dirty,
-            &mut [Packed(0); 2],
+            &mut [Packed::from(RawU16::new(0)); 2],
             Rgb565::BLACK,
             |tile| {
                 Text::with_baseline(

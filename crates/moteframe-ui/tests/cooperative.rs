@@ -3,8 +3,10 @@
 // See LICENSE and NOTICE for license and source attribution.
 
 //! Display writes and fallible service calls stay ordered at tile boundaries.
+#![cfg(feature = "refresh")]
 use core::convert::Infallible;
-use moteframe_core::{Dimensions, Display, Rect, Rgb565 as Packed};
+use moteframe_core::{Dimensions, Display, Rect};
+use moteframe_ui::graphics::pixelcolor::{Rgb565 as Packed, raw::RawU16};
 use moteframe_ui::graphics::prelude::RgbColor;
 use moteframe_ui::{
     CooperativeError, DirtyRegion, graphics::pixelcolor::Rgb565, repaint_cooperative,
@@ -13,6 +15,7 @@ use std::{cell::RefCell, rc::Rc};
 #[derive(Debug)]
 struct Screen(Rc<RefCell<Vec<&'static str>>>);
 impl Display for Screen {
+    type Color = Packed;
     type Error = Infallible;
     fn dimensions(&self) -> Dimensions {
         Dimensions::new(5, 2)
@@ -33,7 +36,7 @@ fn test_should_service_after_every_tile_and_clear_dirty_only_on_complete_success
     let result = repaint_cooperative(
         &mut screen,
         &mut dirty,
-        &mut [Packed(0); 2],
+        &mut [Packed::from(RawU16::new(0)); 2],
         Rgb565::BLACK,
         |_| Ok::<(), Infallible>(()),
         || {
@@ -55,7 +58,7 @@ fn test_should_preserve_entire_dirty_area_on_service_failure_and_retry() {
     let result = repaint_cooperative(
         &mut screen,
         &mut dirty,
-        &mut [Packed(0); 2],
+        &mut [Packed::from(RawU16::new(0)); 2],
         Rgb565::BLACK,
         |_| Ok::<(), Infallible>(()),
         || Err("ble"),
@@ -67,7 +70,7 @@ fn test_should_preserve_entire_dirty_area_on_service_failure_and_retry() {
         repaint_cooperative(
             &mut screen,
             &mut dirty,
-            &mut [Packed(0); 2],
+            &mut [Packed::from(RawU16::new(0)); 2],
             Rgb565::BLACK,
             |_| Ok::<(), Infallible>(()),
             || Ok::<(), Infallible>(())

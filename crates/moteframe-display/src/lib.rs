@@ -7,7 +7,9 @@
 #![no_std]
 #![forbid(unsafe_code)]
 
-use moteframe_core::{DelayMs, Dimensions, Display, DisplayBus, Rect, Rgb565};
+pub use embedded_graphics_core::pixelcolor::Rgb565;
+use embedded_graphics_core::prelude::IntoStorage;
+use moteframe_core::{DelayMs, Dimensions, Display, DisplayBus, Rect};
 
 /// One operation in the caller's verified panel initialization sequence.
 #[derive(Clone, Copy, Debug)]
@@ -110,7 +112,7 @@ impl<B: DisplayBus> DcsDisplay<B> {
         let mut buffer = [0; 64];
         for chunk in pixels.chunks(32) {
             for (destination, pixel) in buffer.chunks_exact_mut(2).zip(chunk) {
-                destination.copy_from_slice(&pixel.0.to_be_bytes());
+                destination.copy_from_slice(&pixel.into_storage().to_be_bytes());
             }
             self.bus.pixels(&buffer[..chunk.len() * 2])?;
         }
@@ -119,6 +121,7 @@ impl<B: DisplayBus> DcsDisplay<B> {
     }
 }
 impl<B: DisplayBus> Display for DcsDisplay<B> {
+    type Color = Rgb565;
     type Error = Error<B::Error>;
     fn dimensions(&self) -> Dimensions {
         self.dimensions

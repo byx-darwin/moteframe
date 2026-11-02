@@ -6,6 +6,10 @@ SPI transactions. Rendering errors invalidate the panel state until explicit
 reinitialization. Initialization command sequences, offsets, power/reset timing
 and compatible panel selection belong to the caller.
 
+The public `Rgb565` re-export is the upstream embedded-graphics-core color type.
+`DcsDisplay::Color` is RGB565; MSB-first encoding remains in this crate. It is
+not a universal driver for every format accepted by the generic UI.
+
 No product-specific initialization table or assets are bundled. Synchronous
 transports must fully finish before returning; shared SPI is foreground-only
 and all devices use the same configured mode and frequency.

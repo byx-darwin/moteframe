@@ -4,6 +4,7 @@
 
 //! Offline scene rendering; writes a PPM using only a host memory display.
 use core::convert::Infallible;
+use moteframe_ui::graphics::pixelcolor::{Rgb565 as Packed, raw::RawU16};
 use std::{
     fs::File,
     io::{BufWriter, Write},
@@ -11,12 +12,12 @@ use std::{
 
 use graphics::{
     mono_font::{MonoTextStyle, ascii::FONT_6X10},
-    pixelcolor::{Rgb565, raw::RawU16},
+    pixelcolor::Rgb565,
     prelude::*,
     primitives::{Circle, Line, PrimitiveStyle, Rectangle},
     text::{Baseline, Text},
 };
-use moteframe_core::{Dimensions, Display, Rect, Rgb565 as Packed};
+use moteframe_core::{Dimensions, Display, Rect};
 use moteframe_ui::{DirtyRegion, graphics, repaint};
 
 const WIDTH: u16 = 64;
@@ -28,6 +29,7 @@ struct MemoryDisplay {
     writes: usize,
 }
 impl Display for MemoryDisplay {
+    type Color = Packed;
     type Error = &'static str;
     fn dimensions(&self) -> Dimensions {
         Dimensions::new(WIDTH, HEIGHT)
@@ -74,7 +76,7 @@ fn scene<T: DrawTarget<Color = Rgb565, Error = Infallible>>(
 fn main() -> Result<(), &'static str> {
     let destination = std::env::args().nth(1).ok_or("usage: offline OUTPUT.ppm")?;
     let mut display = MemoryDisplay {
-        pixels: [Packed(0); 2560],
+        pixels: [Packed::from(RawU16::new(0)); 2560],
         writes: 0,
     };
     let mut dirty = DirtyRegion::new(display.dimensions());
@@ -82,7 +84,7 @@ fn main() -> Result<(), &'static str> {
     repaint(
         &mut display,
         &mut dirty,
-        &mut [Packed(0); 16],
+        &mut [Packed::from(RawU16::new(0)); 16],
         Rgb565::BLACK,
         |tile| scene(tile),
     )
@@ -90,8 +92,7 @@ fn main() -> Result<(), &'static str> {
     let file = File::create(destination).map_err(|_| "cannot create PPM")?;
     let mut output = BufWriter::new(file);
     write!(output, "P6\n{WIDTH} {HEIGHT}\n255\n").map_err(|_| "cannot write header")?;
-    for Packed(pixel) in display.pixels {
-        let color = Rgb565::from(RawU16::new(pixel));
+    for color in display.pixels {
         let rgb = [
             u16::from(color.r()) * 255 / 31,
             u16::from(color.g()) * 255 / 63,

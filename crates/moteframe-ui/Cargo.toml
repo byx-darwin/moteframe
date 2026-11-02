@@ -9,6 +9,13 @@ repository.workspace = true
 publish.workspace = true
 readme = "README.md"
 
+[features]
+default = ["layout", "refresh", "damage"]
+layout = []
+refresh = []
+damage = ["refresh"]
+frame-pacing = ["refresh"]
+
 [dependencies]
 moteframe-core.workspace = true
 embedded-graphics.workspace = true
@@ -18,3 +25,11 @@ moteframe-display.workspace = true
 
 [lints]
 workspace = true
+
+[[example]]
+name = "offline"
+required-features = ["refresh"]
+
+[[example]]
+name = "memory"
+required-features = ["refresh"]

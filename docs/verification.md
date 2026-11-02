@@ -1,5 +1,11 @@
 # Offline verification — 2026-11-02
 
+This page records the initial 0.1 extraction/publication. The later local 0.2
+color-interface candidate and its measured memory limits are recorded in
+[color-types.md](color-types.md). UI configuration r0.2 implementation and new
+feature/link evidence are recorded separately in
+[ui-configuration-implementation.md](ui-configuration-implementation.md).
+
 MoteFrame's first portable extraction contains four crates. No device, debug
 probe, radio, firmware image, product backend or private asset is required.
 

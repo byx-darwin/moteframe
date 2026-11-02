@@ -23,6 +23,9 @@ Direct upstream dependencies are:
 - embedded-graphics 0.8.2: MIT OR Apache-2.0; the procedural example uses its
   built-in ASCII font and drawing primitives.
   <https://github.com/embedded-graphics/embedded-graphics>
+- embedded-graphics-core 0.4.1: MIT OR Apache-2.0; shared upstream color types
+  used directly by the RGB565 driver. Already present in the original lockfile.
+  <https://github.com/embedded-graphics/embedded-graphics>
 
 Dependencies are referenced through Cargo, not copied into this tree. The locked
 transitive dependency graph is audited by cargo-deny. Each dependency retains

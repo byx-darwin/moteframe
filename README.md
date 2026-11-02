@@ -12,22 +12,26 @@ allocation-free graphics, display transport and bounded buses.
 
 | Crate | 职责 |
 | --- | --- |
-| `moteframe-core` | 屏幕／GPIO／延时／只读接口，前台共享 SPI 事务 |
+| `moteframe-core` | 带颜色关联类型的屏幕接口、GPIO／延时／只读接口、共享 SPI |
 | `moteframe-display` | 通用 DCS 地址窗口、RGB565 分块写入，独立和共享 SPI 传输 |
-| `moteframe-ui` | embedded-graphics 绘图适配、布局、裁剪、脏区域及协作式重绘 |
+| `moteframe-ui` | 类型化绘图与配置、可选布局／刷新／差分／节流、资源版本和恢复 |
 | `moteframe-i2c` | 有限时钟等待的开漏软件 I²C 寄存器读取 |
 
 ```text
 application + board adapters (outside this project)
   ├── moteframe-ui ────────── embedded-graphics
   │       └── moteframe-core ── embedded-hal
-  ├── moteframe-display ─────── moteframe-core + embedded-hal
+  ├── moteframe-display ─────── moteframe-core + embedded-hal + embedded-graphics-core
   └── moteframe-i2c ─────────── caller-supplied open-drain pins + delay
 ```
 
 所有库均为 `no_std`、无堆、禁止 unsafe。主机示例和测试使用 `std`。
 产品业务、具体板级引脚、芯片寄存器、蓝牙、存储、原机素材及厂商资源不在首批范围内。
 显示初始化序列和电气时序由调用方提供。
+
+0.2.0 候选将颜色从通用接口和 UI 中抽出：UI 跟随 `Display::Color`，
+具体驱动负责编码。目前物理显示驱动仍为 RGB565 DCS；RGB888、灰度、单色
+已通过离线参考显示端验证。迁移及内存核算见 [docs/color-types.md](docs/color-types.md)。
 
 ## 本地开发
 
@@ -38,6 +42,8 @@ application + board adapters (outside this project)
 make check           # 格式、主机/ARM lint、测试、文档与边界检查
 make build           # Cortex-M0 release 库
 make example         # 生成 target/moteframe-demo.ppm，并检查实际像素
+make memory          # 宿主/ARM 颜色布局、对象代码及单函数栈帧
+make ui-config       # 功能组合、编译拒绝及配置内存／链接探针
 make packages        # 检查 Cargo 计划打包的文件，不发布
 make supply-chain    # 依赖许可证、advisory 和依赖来源检查
 make secrets         # 本地工作树密钥扫描
@@ -80,3 +86,14 @@ NOTICE 可随产品文档／第三方开源声明提供，也可放在通常展�
 
 每个 crate 均携带 LICENSE 和 NOTICE。上游依赖保留其自己的许可证，见
 [NOTICE.md](NOTICE.md)。本仓库的许可证不适用于被排除的私有产品、素材或厂商软件。
+
+UI configuration r0.2 is available in the 0.2.0 source candidate in `moteframe-ui`:
+[design](docs/ui-configuration.md),
+[implementation and offline memory evidence](docs/ui-configuration-implementation.md).
+Optional features remove layout, refresh/damage or pacing fields and APIs at
+compile time. `make ui-config` checks real consumer builds and linked ARM probes.
+
+The 0.2.0 source candidate includes the typed-color migration, configuration
+interfaces and reviewed compile-fail gate correction. See the
+[multi-role acceptance](docs/ui-configuration-review-r02.md). This source update
+does not publish crates.io packages, release tags, firmware or private resources.

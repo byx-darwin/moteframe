@@ -4,8 +4,8 @@
 
 use core::convert::Infallible;
 
-use embedded_graphics::{pixelcolor::Rgb565, prelude::*, primitives::Rectangle};
-use moteframe_core::{Dimensions as DisplaySize, Display, Rect, Rgb565 as Packed};
+use embedded_graphics::{pixelcolor::PixelColor, prelude::*, primitives::Rectangle};
+use moteframe_core::{Dimensions as DisplaySize, Display, Rect};
 
 use crate::geometry::{clip, contiguous_pixels, visible};
 
@@ -79,12 +79,12 @@ pub enum RefreshError<D, S> {
 /// The bounding box is the current clip. Use separately supplied display bounds
 /// for layout. Pixels outside this tile are ignored, including negative points.
 #[derive(Debug)]
-pub struct Tile<'a> {
+pub struct Tile<'a, C> {
     area: Rect,
-    pixels: &'a mut [Packed],
+    pixels: &'a mut [C],
 }
 
-impl Dimensions for Tile<'_> {
+impl<C> Dimensions for Tile<'_, C> {
     fn bounding_box(&self) -> Rectangle {
         Rectangle::new(
             Point::new(i32::from(self.area.x), i32::from(self.area.y)),
@@ -93,7 +93,7 @@ impl Dimensions for Tile<'_> {
     }
 }
 
-impl Tile<'_> {
+impl<C> Tile<'_, C> {
     fn intersection(&self, area: Rectangle) -> Option<Rect> {
         let clipped = clip(
             area,
@@ -108,13 +108,13 @@ impl Tile<'_> {
     }
 }
 
-impl DrawTarget for Tile<'_> {
-    type Color = Rgb565;
+impl<C: PixelColor> DrawTarget for Tile<'_, C> {
+    type Color = C;
     type Error = Infallible;
 
     fn draw_iter<I>(&mut self, pixels: I) -> Result<(), Self::Error>
     where
-        I: IntoIterator<Item = Pixel<Rgb565>>,
+        I: IntoIterator<Item = Pixel<C>>,
     {
         let bounds = DisplaySize::new(self.area.x + self.area.width, self.area.y + 1);
         for Pixel(point, color) in pixels {
@@ -122,7 +122,7 @@ impl DrawTarget for Tile<'_> {
                 && x >= self.area.x
                 && y == self.area.y
             {
-                self.pixels[usize::from(x - self.area.x)] = Packed(color.into_storage());
+                self.pixels[usize::from(x - self.area.x)] = color;
             }
         }
         Ok(())
@@ -130,7 +130,7 @@ impl DrawTarget for Tile<'_> {
 
     fn fill_contiguous<I>(&mut self, area: &Rectangle, colors: I) -> Result<(), Self::Error>
     where
-        I: IntoIterator<Item = Rgb565>,
+        I: IntoIterator<Item = C>,
     {
         if self.intersection(*area).is_some() {
             self.draw_iter(contiguous_pixels(*area, colors))?;
@@ -138,11 +138,10 @@ impl DrawTarget for Tile<'_> {
         Ok(())
     }
 
-    fn fill_solid(&mut self, area: &Rectangle, color: Rgb565) -> Result<(), Self::Error> {
+    fn fill_solid(&mut self, area: &Rectangle, color: C) -> Result<(), Self::Error> {
         if let Some(clipped) = self.intersection(*area) {
             let start = usize::from(clipped.x - self.area.x);
-            self.pixels[start..start + usize::from(clipped.width)]
-                .fill(Packed(color.into_storage()));
+            self.pixels[start..start + usize::from(clipped.width)].fill(color);
         }
         Ok(())
     }
@@ -162,13 +161,14 @@ impl DrawTarget for Tile<'_> {
 pub fn repaint<D, S, F>(
     display: &mut D,
     dirty: &mut DirtyRegion,
-    scratch: &mut [Packed],
-    background: Rgb565,
+    scratch: &mut [D::Color],
+    background: D::Color,
     scene: F,
 ) -> Result<(), RefreshError<D::Error, S>>
 where
     D: Display,
-    F: FnMut(&mut Tile<'_>) -> Result<(), S>,
+    D::Color: PixelColor,
+    F: FnMut(&mut Tile<'_, D::Color>) -> Result<(), S>,
 {
     match repaint_cooperative(display, dirty, scratch, background, scene, || {
         Ok::<(), Infallible>(())
@@ -201,14 +201,15 @@ pub enum CooperativeError<D, S, Y> {
 pub fn repaint_cooperative<D, S, Y, F, P>(
     display: &mut D,
     dirty: &mut DirtyRegion,
-    scratch: &mut [Packed],
-    background: Rgb565,
+    scratch: &mut [D::Color],
+    background: D::Color,
     mut scene: F,
     mut service: P,
 ) -> Result<(), CooperativeError<D::Error, S, Y>>
 where
     D: Display,
-    F: FnMut(&mut Tile<'_>) -> Result<(), S>,
+    D::Color: PixelColor,
+    F: FnMut(&mut Tile<'_, D::Color>) -> Result<(), S>,
     P: FnMut() -> Result<(), Y>,
 {
     let Some(area) = dirty.pending else {
@@ -228,7 +229,7 @@ where
         while x < end {
             let width = (end - x).min(capacity);
             let pixels = &mut scratch[..usize::from(width)];
-            pixels.fill(Packed(background.into_storage()));
+            pixels.fill(background);
             let tile_area = Rect::new(x, y, width, 1);
             scene(&mut Tile {
                 area: tile_area,
@@ -248,6 +249,7 @@ where
 
 /// Failure while comparing two stable scenes; no display writes are performed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg(feature = "damage")]
 pub enum DamageError<S, Y> {
     /// Two complete display rows are required.
     ShortScratch,
@@ -257,7 +259,7 @@ pub enum DamageError<S, Y> {
     Service(Y),
 }
 
-/// Finds the exact bounding rectangle of changed RGB565 pixels using two rows.
+/// Finds the exact bounding rectangle of changed logical pixels using two rows.
 ///
 /// Both scenes must remain stable for the complete scan. Service runs after each
 /// compared row, including the last. Identical or empty scenes return `None`.
@@ -265,12 +267,13 @@ pub enum DamageError<S, Y> {
 /// # Errors
 /// Rejects insufficient scratch before invoking either scene; propagates scene
 /// and service failures without reporting a partial damage rectangle.
-pub fn damage_cooperative<S, Y>(
+#[cfg(feature = "damage")]
+pub fn damage_cooperative<C: PixelColor, S, Y>(
     dimensions: DisplaySize,
-    scratch: &mut [Packed],
-    background: Rgb565,
-    mut previous: impl FnMut(&mut Tile<'_>) -> Result<(), S>,
-    mut next: impl FnMut(&mut Tile<'_>) -> Result<(), S>,
+    scratch: &mut [C],
+    background: C,
+    mut previous: impl FnMut(&mut Tile<'_, C>) -> Result<(), S>,
+    mut next: impl FnMut(&mut Tile<'_, C>) -> Result<(), S>,
     mut service: impl FnMut() -> Result<(), Y>,
 ) -> Result<Option<Rect>, DamageError<S, Y>> {
     if dimensions.width == 0 || dimensions.height == 0 {
@@ -284,8 +287,8 @@ pub fn damage_cooperative<S, Y>(
     let (old, new) = scratch.split_at_mut(width);
     let mut dirty = DirtyRegion::new(dimensions);
     for y in 0..dimensions.height {
-        old.fill(Packed(background.into_storage()));
-        new.fill(Packed(background.into_storage()));
+        old.fill(background);
+        new.fill(background);
         let area = Rect::new(0, y, dimensions.width, 1);
         previous(&mut Tile { area, pixels: old }).map_err(DamageError::Scene)?;
         next(&mut Tile { area, pixels: new }).map_err(DamageError::Scene)?;

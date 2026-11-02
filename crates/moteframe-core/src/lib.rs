@@ -66,10 +66,6 @@ impl Rect {
     }
 }
 
-/// A packed RGB565 pixel. Transport byte order is specified by the driver.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Rgb565(pub u16);
-
 /// Synchronous panel transport. Implementations control CS and DC internally.
 ///
 /// Commands finish before returning. Consecutive `pixels` calls continue the same
@@ -95,6 +91,8 @@ pub trait DelayMs {
 
 /// Replaceable display interface; no framebuffer or business UI is required.
 pub trait Display {
+    /// Logical pixel color. The driver owns its physical encoding.
+    type Color: Copy;
     /// Validation or device failure.
     type Error;
     /// Logical geometry.
@@ -102,7 +100,7 @@ pub trait Display {
     /// Writes exactly one pixel per rectangle position, in row-major order.
     /// # Errors
     /// Rejects invalid rectangles, lengths, unavailable devices or I/O failures.
-    fn write(&mut self, rectangle: Rect, pixels: &[Rgb565]) -> Result<(), Self::Error>;
+    fn write(&mut self, rectangle: Rect, pixels: &[Self::Color]) -> Result<(), Self::Error>;
 }
 
 /// Board startup interface. Display reset/power and BLE boot remain board concerns.

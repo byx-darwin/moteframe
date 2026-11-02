@@ -8,7 +8,7 @@ members = [
 resolver = "3"
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 rust-version = "1.96.0"
 license = "Apache-2.0"
@@ -16,13 +16,15 @@ repository = "https://github.com/byx-darwin/moteframe"
 publish = false
 
 [workspace.dependencies]
-moteframe-core = { path = "crates/moteframe-core", version = "=0.1.0" }
-moteframe-display = { path = "crates/moteframe-display", version = "=0.1.0" }
+moteframe-core = { path = "crates/moteframe-core", version = "=0.2.0" }
+moteframe-display = { path = "crates/moteframe-display", version = "=0.2.0" }
 embedded-hal = { version = "=1.0.0", default-features = false }
 embedded-graphics = { version = "=0.8.2", default-features = false }
+embedded-graphics-core = { version = "=0.4.1", default-features = false }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(rgb565_only)', 'cfg(ui_layout_probe)'] }
 missing_docs = "warn"
 missing_debug_implementations = "warn"
 

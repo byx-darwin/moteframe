@@ -1,9 +1,9 @@
 PYTHON ?= python3
 TARGET ?= thumbv6m-none-eabi
 
-.PHONY: check fmt format lint test doc boundary python-tests build example packages independent supply-chain secrets hooks-install hooks
+.PHONY: check fmt format lint test doc boundary python-tests build example memory ui-config packages independent supply-chain secrets hooks-install hooks
 
-check: fmt lint test doc boundary python-tests example packages independent
+check: fmt lint test doc boundary python-tests example memory ui-config packages independent
 
 fmt:
 	cargo fmt --all -- --check
@@ -36,8 +36,15 @@ example:
 	cargo run -p moteframe-ui --example offline --offline --locked -- target/moteframe-demo.ppm
 	$(PYTHON) scripts/check_example.py target/moteframe-demo.ppm
 
+ui-config:
+	$(PYTHON) scripts/check_ui_configuration.py
+	$(PYTHON) scripts/check_ui_memory.py
+
 packages:
 	$(PYTHON) scripts/check_packages.py
+
+memory:
+	$(PYTHON) scripts/check_memory.py
 
 independent:
 	cargo test --manifest-path crates/moteframe-core/Cargo.toml --all-targets --offline --locked

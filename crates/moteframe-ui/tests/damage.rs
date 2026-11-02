@@ -3,20 +3,22 @@
 // See LICENSE and NOTICE for license and source attribution.
 
 //! Exact damage bounds and cooperative scheduling, independent of a watch skin.
-use moteframe_core::{Dimensions, Rect, Rgb565 as Packed};
+#![cfg(feature = "damage")]
+use moteframe_core::{Dimensions, Rect};
+use moteframe_ui::graphics::pixelcolor::{Rgb565 as Packed, raw::RawU16};
 use moteframe_ui::{
     damage_cooperative,
     graphics::{pixelcolor::Rgb565, prelude::*, primitives::Rectangle},
 };
 #[test]
 fn test_should_find_exact_damage_without_a_framebuffer() {
-    let mut scratch = [Packed(0); 16];
+    let mut scratch = [Packed::from(RawU16::new(0)); 16];
     let mut services = 0;
     let result = damage_cooperative(
         Dimensions::new(8, 6),
         &mut scratch,
         Rgb565::new(0, 0, 0),
-        |_: &mut moteframe_ui::Tile<'_>| Ok::<(), ()>(()),
+        |_: &mut moteframe_ui::Tile<'_, Rgb565>| Ok::<(), ()>(()),
         |t| {
             t.fill_solid(
                 &Rectangle::new(Point::new(2, 1), Size::new(3, 4)),
@@ -34,7 +36,7 @@ fn test_should_find_exact_damage_without_a_framebuffer() {
 }
 #[test]
 fn test_should_reject_short_scratch_and_stop_on_service_failure() {
-    let mut scratch = [Packed(0); 15];
+    let mut scratch = [Packed::from(RawU16::new(0)); 15];
     let mut calls = 0;
     assert!(
         damage_cooperative(
@@ -51,7 +53,7 @@ fn test_should_reject_short_scratch_and_stop_on_service_failure() {
         .is_err()
     );
     assert_eq!(calls, 0);
-    let mut scratch = [Packed(0); 16];
+    let mut scratch = [Packed::from(RawU16::new(0)); 16];
     let mut services = 0;
     let r = damage_cooperative(
         Dimensions::new(8, 6),
@@ -69,8 +71,8 @@ fn test_should_reject_short_scratch_and_stop_on_service_failure() {
 }
 #[test]
 fn test_should_report_no_damage_for_identical_overwriting_scenes() {
-    let mut scratch = [Packed(0); 16];
-    let scene = |t: &mut moteframe_ui::Tile<'_>| {
+    let mut scratch = [Packed::from(RawU16::new(0)); 16];
+    let scene = |t: &mut moteframe_ui::Tile<'_, Rgb565>| {
         t.fill_solid(
             &Rectangle::new(Point::new(-3, -2), Size::new(8, 7)),
             Rgb565::new(0, 63, 0),
@@ -92,14 +94,14 @@ fn test_should_report_no_damage_for_identical_overwriting_scenes() {
 
 #[test]
 fn test_should_include_erased_pixels_when_content_shrinks() {
-    let mut scratch = [Packed(0); 16];
-    let old = |t: &mut moteframe_ui::Tile<'_>| {
+    let mut scratch = [Packed::from(RawU16::new(0)); 16];
+    let old = |t: &mut moteframe_ui::Tile<'_, Rgb565>| {
         t.fill_solid(
             &Rectangle::new(Point::new(1, 2), Size::new(6, 2)),
             Rgb565::new(31, 0, 0),
         )
     };
-    let new = |t: &mut moteframe_ui::Tile<'_>| {
+    let new = |t: &mut moteframe_ui::Tile<'_, Rgb565>| {
         t.fill_solid(
             &Rectangle::new(Point::new(1, 2), Size::new(2, 2)),
             Rgb565::new(31, 0, 0),
@@ -119,7 +121,7 @@ fn test_should_include_erased_pixels_when_content_shrinks() {
 }
 #[test]
 fn test_should_stop_before_service_on_scene_failure_and_ignore_empty_dimensions() {
-    let mut scratch = [Packed(0); 16];
+    let mut scratch = [Packed::from(RawU16::new(0)); 16];
     let mut calls = 0;
     assert_eq!(
         damage_cooperative(

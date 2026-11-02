@@ -3,13 +3,15 @@
 // See LICENSE and NOTICE for license and source attribution.
 
 //! Partial redraw behavior using actual rasterization into caller storage.
+#![cfg(feature = "refresh")]
 use core::convert::Infallible;
 use graphics::{
     pixelcolor::Rgb565,
     prelude::*,
     primitives::{PrimitiveStyle, Rectangle},
 };
-use moteframe_core::{Dimensions, Display, Rect, Rgb565 as Packed};
+use moteframe_core::{Dimensions, Display, Rect};
+use moteframe_ui::graphics::pixelcolor::{Rgb565 as Packed, raw::RawU16};
 use moteframe_ui::{DirtyRegion, RefreshError, graphics, repaint};
 
 #[derive(Debug)]
@@ -28,6 +30,7 @@ impl Screen {
     }
 }
 impl Display for Screen {
+    type Color = Packed;
     type Error = &'static str;
     fn dimensions(&self) -> Dimensions {
         self.size
@@ -64,7 +67,7 @@ fn test_should_repaint_only_dirty_pixels_with_scratch_narrower_than_region() {
     let result = repaint(
         &mut screen,
         &mut dirty,
-        &mut [Packed(0xffff); 2],
+        &mut [Packed::from(RawU16::new(0xffff)); 2],
         Rgb565::BLACK,
         |tile| {
             Rectangle::new(Point::new(3, 3), Size::new(1, 2))
@@ -76,10 +79,22 @@ fn test_should_repaint_only_dirty_pixels_with_scratch_narrower_than_region() {
     assert_eq!(
         screen.writes,
         vec![
-            (Rect::new(2, 3, 2, 1), vec![Packed(0), Packed(0xf800)]),
-            (Rect::new(4, 3, 1, 1), vec![Packed(0)]),
-            (Rect::new(2, 4, 2, 1), vec![Packed(0), Packed(0xf800)]),
-            (Rect::new(4, 4, 1, 1), vec![Packed(0)]),
+            (
+                Rect::new(2, 3, 2, 1),
+                vec![
+                    Packed::from(RawU16::new(0)),
+                    Packed::from(RawU16::new(0xf800))
+                ]
+            ),
+            (Rect::new(4, 3, 1, 1), vec![Packed::from(RawU16::new(0))]),
+            (
+                Rect::new(2, 4, 2, 1),
+                vec![
+                    Packed::from(RawU16::new(0)),
+                    Packed::from(RawU16::new(0xf800))
+                ]
+            ),
+            (Rect::new(4, 4, 1, 1), vec![Packed::from(RawU16::new(0))]),
         ]
     );
     assert_eq!(dirty.pending(), None);
@@ -94,7 +109,7 @@ fn test_should_keep_entire_dirty_region_on_partial_display_failure_and_retry() {
     let result = repaint(
         &mut screen,
         &mut dirty,
-        &mut [Packed(0); 3],
+        &mut [Packed::from(RawU16::new(0)); 3],
         Rgb565::GREEN,
         |_| Ok::<_, Infallible>(()),
     );
@@ -106,7 +121,7 @@ fn test_should_keep_entire_dirty_region_on_partial_display_failure_and_retry() {
         repaint(
             &mut screen,
             &mut dirty,
-            &mut [Packed(0); 3],
+            &mut [Packed::from(RawU16::new(0)); 3],
             Rgb565::GREEN,
             |_| Ok::<_, Infallible>(())
         ),
@@ -114,7 +129,10 @@ fn test_should_keep_entire_dirty_region_on_partial_display_failure_and_retry() {
     );
     assert_eq!(
         screen.writes[2],
-        (Rect::new(0, 1, 3, 1), vec![Packed(0x07e0); 3])
+        (
+            Rect::new(0, 1, 3, 1),
+            vec![Packed::from(RawU16::new(0x07e0)); 3]
+        )
     );
     assert_eq!(dirty.pending(), None);
 }
@@ -128,7 +146,7 @@ fn test_should_keep_dirty_region_on_scene_failure() {
         repaint(
             &mut screen,
             &mut dirty,
-            &mut [Packed(0); 2],
+            &mut [Packed::from(RawU16::new(0)); 2],
             Rgb565::BLACK,
             |_| Err("scene")
         ),
@@ -152,7 +170,7 @@ fn test_should_reject_empty_scratch_and_geometry_changes_before_drawing() {
         repaint(
             &mut screen,
             &mut dirty,
-            &mut [Packed(0); 2],
+            &mut [Packed::from(RawU16::new(0)); 2],
             Rgb565::BLACK,
             |_| Ok::<_, Infallible>(())
         ),
@@ -185,7 +203,7 @@ fn test_should_preserve_contiguous_color_positions_within_global_tile_clip() {
         repaint(
             &mut screen,
             &mut dirty,
-            &mut [Packed(0); 1],
+            &mut [Packed::from(RawU16::new(0)); 1],
             Rgb565::BLACK,
             |tile| {
                 tile.fill_contiguous(
@@ -205,8 +223,14 @@ fn test_should_preserve_contiguous_color_positions_within_global_tile_clip() {
     assert_eq!(
         screen.writes,
         vec![
-            (Rect::new(1, 0, 1, 1), vec![Packed(0x07e0)]),
-            (Rect::new(2, 0, 1, 1), vec![Packed(0x001f)]),
+            (
+                Rect::new(1, 0, 1, 1),
+                vec![Packed::from(RawU16::new(0x07e0))]
+            ),
+            (
+                Rect::new(2, 0, 1, 1),
+                vec![Packed::from(RawU16::new(0x001f))]
+            ),
         ]
     );
 }
@@ -219,7 +243,7 @@ fn test_should_clip_extreme_tile_fill_inputs_without_panicking() {
     let result = repaint(
         &mut screen,
         &mut dirty,
-        &mut [Packed(0); 2],
+        &mut [Packed::from(RawU16::new(0)); 2],
         Rgb565::BLACK,
         |tile| {
             tile.fill_contiguous(
@@ -235,6 +259,9 @@ fn test_should_clip_extreme_tile_fill_inputs_without_panicking() {
     assert_eq!(result, Ok(()));
     assert_eq!(
         screen.writes,
-        vec![(Rect::new(0, 0, 2, 1), vec![Packed(0x07e0); 2])]
+        vec![(
+            Rect::new(0, 0, 2, 1),
+            vec![Packed::from(RawU16::new(0x07e0)); 2]
+        )]
     );
 }

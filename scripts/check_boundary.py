@@ -9,7 +9,7 @@ import subprocess
 import sys
 
 PACKAGES = {"moteframe-core", "moteframe-ui", "moteframe-display", "moteframe-i2c"}
-UPSTREAM = {"embedded-hal", "embedded-graphics"}
+UPSTREAM = {"embedded-hal", "embedded-graphics", "embedded-graphics-core"}
 RESOLVED_UPSTREAM = UPSTREAM | {
     "autocfg", "az", "byteorder", "embedded-graphics-core", "float-cmp", "micromath", "num-traits",
 }
@@ -19,7 +19,8 @@ RUST_FILES = {
     "moteframe-ui": {
         "src/lib.rs", "src/geometry.rs", "src/layout.rs", "src/refresh.rs", "src/stream.rs",
         "tests/damage.rs", "tests/refresh.rs", "tests/cooperative.rs", "tests/foundation.rs",
-        "tests/dcs.rs", "examples/offline.rs",
+        "tests/dcs.rs", "tests/colors.rs", "tests/configuration.rs", "tests/session.rs", "tests/pacing.rs", "tests/run.rs",
+        "examples/config_memory.rs", "src/configuration.rs", "src/resources.rs", "src/session.rs", "src/pacing.rs", "examples/offline.rs", "examples/memory.rs",
     },
     "moteframe-display": {"src/lib.rs", "src/spi.rs", "src/shared.rs", "tests/shared.rs", "tests/spi.rs", "tests/stream.rs"},
     "moteframe-i2c": {"src/lib.rs", "tests/read.rs"},
@@ -32,12 +33,15 @@ ROOT_FILES = {
     "docs/progress.md", "docs/verification.md",
     "docs/plans/2026-11-02-foundation-extraction.md", "specs/foundation-extraction.md",
     "docs/plans/2026-11-02-publication.md",
+    "specs/color-types.md", "docs/plans/2026-11-02-color-types.md", "docs/color-types.md",
+    "docs/ui-configuration-review-r02.md", "docs/ui-configuration-implementation.md", "docs/ui-configuration.md", "docs/plans/2026-11-02-ui-configuration.md",
 }
 SCRIPTS = {
     "scripts/check_boundary.py", "scripts/commit_message.py", "scripts/check_example.py",
     "scripts/check_packages.py", "scripts/tests/test_boundary.py",
     "scripts/tests/test_commit_message.py", "scripts/tests/test_example.py",
     "scripts/tests/test_packages.py",
+    "scripts/check_memory.py", "scripts/tests/test_memory.py", "scripts/check_ui_configuration.py", "scripts/check_ui_memory.py", "scripts/tests/test_ui_memory.py", "scripts/tests/test_ui_configuration.py",
 }
 BINARY_SUFFIXES = {".bin", ".lib", ".a", ".elf", ".hex", ".pdf", ".doc", ".docx", ".png", ".jpg", ".zip", ".7z", ".rar", ".pem", ".key"}
 
