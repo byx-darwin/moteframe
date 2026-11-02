@@ -230,10 +230,18 @@ pub enum WriteBufferError {
 ///
 /// An empty event remains distinct from an empty slot, even when `N == 0`.
 /// Clearing or taking invalidates bytes logically; it does not zero memory.
-#[derive(Debug)]
 pub struct WriteSlot<T: Copy, const N: usize> {
     bytes: [u8; N],
     pending: Option<WriteMeta<T>>,
+}
+
+impl<T: Copy, const N: usize> fmt::Debug for WriteSlot<T, N> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("WriteSlot")
+            .field("capacity", &N)
+            .field("length", &self.pending.map(|meta| meta.length))
+            .finish_non_exhaustive()
+    }
 }
 
 impl<T: Copy, const N: usize> WriteSlot<T, N> {

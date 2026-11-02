@@ -30,7 +30,8 @@ SEEDS = [0, 1, 2, 3, 4, 8, 65535, 4294967295]
 BASELINE_MANIFESTS = ('Cargo.toml', *(f'crates/{crate}/Cargo.toml' for crate in
              ['moteframe-core', 'moteframe-display', 'moteframe-ui', 'moteframe-i2c']))
 MANIFESTS = BASELINE_MANIFESTS
-CURRENT_MANIFESTS = (*BASELINE_MANIFESTS, 'crates/moteframe-storage/Cargo.toml', 'crates/moteframe-ble/Cargo.toml')
+CURRENT_MANIFESTS = (*BASELINE_MANIFESTS, 'crates/moteframe-storage/Cargo.toml', 'crates/moteframe-ble/Cargo.toml',
+                     'crates/moteframe-assets/Cargo.toml', 'crates/moteframe-input/Cargo.toml')
 BASELINE_SOURCES = (*BASELINE_MANIFESTS, 'Cargo.lock',
                     'crates/moteframe-core/src/lib.rs', 'crates/moteframe-core/src/read.rs',
                     'crates/moteframe-core/src/spi.rs', 'crates/moteframe-display/src/lib.rs',

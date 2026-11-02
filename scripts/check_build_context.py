@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 
 POLICY = Path(__file__).resolve().parent / 'build-context-migrations.json'
-POLICY_SHA256 = '0caedfa54ca20d5aaf6dde93d49bb22af388178b5494f45d94e9126a5c2ea6c0'
+POLICY_SHA256 = '4f05f5871a79ced2967eb1ca408d2b87ff9aae89094f1112ad6909e89dee1d79'
 
 
 def load_policy(path=POLICY, expected_hash=None):

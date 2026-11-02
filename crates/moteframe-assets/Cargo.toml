@@ -1,0 +1,21 @@
+[package]
+name = "moteframe-assets"
+description = "Bounded source-backed raster and glyph decoding with caller-owned scratch"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+readme = "README.md"
+
+[dependencies]
+moteframe-core.workspace = true
+embedded-graphics-core.workspace = true
+
+[dev-dependencies]
+moteframe-storage = { path = "../moteframe-storage", version = "=0.2.0" }
+moteframe-ui = { path = "../moteframe-ui", version = "=0.2.0", default-features = false, features = ["refresh"] }
+
+[lints]
+workspace = true

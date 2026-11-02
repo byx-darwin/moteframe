@@ -24,6 +24,8 @@ allocation-free graphics, display transport, bounded buses, storage views and BL
 | [moteframe-i2c](crates/moteframe-i2c/README.md) | 有限时钟等待的开漏 I²C 指针读取、普通地址校验、可选 STOP 检查与资源取回 |
 | [moteframe-storage](crates/moteframe-storage/README.md) | 基于 `ReadAt` 的切片数据源、借用适配与有界只读范围视图 |
 | [moteframe-ble](crates/moteframe-ble/README.md) | 通知容量／目标校验、后端入队边界和完整接收写的单槽缓冲 |
+| [moteframe-assets](crates/moteframe-assets/README.md) | 使用调用方 reader／scratch 的多颜色 raster 和字形解码 |
+| [moteframe-input](crates/moteframe-input/README.md) | 可配置按键／单触点手势状态机、有界事件队列 |
 
 ```text
 application + board adapters (outside this project)
@@ -32,7 +34,9 @@ application + board adapters (outside this project)
   ├── moteframe-display ─────── moteframe-core + embedded-hal + embedded-graphics-core
   ├── moteframe-i2c ─────────── caller-supplied open-drain pins + delay
   ├── moteframe-storage ─────── moteframe-core::ReadAt
-  └── moteframe-ble ─────────── caller-supplied GATT notification backend
+  ├── moteframe-ble ─────────── caller-supplied GATT notification backend
+  ├── moteframe-assets ──────── moteframe-core::ReadAt + embedded-graphics-core
+  └── moteframe-input ───────── normalized samples + monotonic microseconds
 ```
 
 所有库均为 `no_std`、无堆、禁止 unsafe。主机示例和测试使用 `std`。
@@ -337,6 +341,23 @@ pub mod ble_example {
 取回原对象，无隐式发送或恢复。详见 [BLE 契约](crates/moteframe-ble/README.md)和
 [设计、兼容与资源证据](docs/portable-modules.md)。
 
+## 素材和输入（源码候选）
+
+新增模块独立选择，现有 core/UI 不反向依赖它们。`moteframe-assets::Raster<F>`
+只保存几何和编码描述；读取复用 `ReadAt`／storage 窗口，字节 scratch 和原生颜色输出
+由调用方提供。支持 RGB565 BE/LE、RGB888、Gray8、0/1 单字节单色及自定义颜色。
+`Glyph` 只补字形定位参数；没有内置字库、原厂素材、压缩或第二套资源版本。
+UI 继续使用现有 ResourceKey/Metadata/View；不可变目录与可变 reader 分开持有。
+
+`moteframe-input` 不依赖屏幕、总线或 BLE。调用方提供尺寸、去抖／长按／滑动阈值，
+输入标准化按键或 Down/Move/Up/Cancel。时间统一为同一启动代次内的单调微秒。
+队满、时钟回退、非法坐标或顺序不提交状态，调用方保留并先重试失败样本；
+实际 N 槽队列不覆盖已有事件。硬件寄存器、坐标映射和页面动作继续由设备工程提供。
+
+字节／事件容器的 Debug 只输出元信息，不展开载荷或 provider；逻辑删除不承诺安全擦除。
+完整完成语义、背压／不确定错误和恢复边界见[公共契约](docs/public-contracts.md)，
+组合测试与内存口径见[assets/input 验收](docs/assets-input.md)。本轮修改尚未作为发布版本提供。
+
 ## 本地开发
 
 需要已安装的 Rust 1.96.0（rustfmt、Clippy、`thumbv6m-none-eabi` target）、Python 3.9+、Make。
@@ -351,6 +372,7 @@ make ui-config       # 功能组合、编译拒绝及配置内存／链接探针
 make core-compat     # core 消费者、所有权拒绝与固定 ARM 体积对比
 make i2c-compat      # I²C 旧接口零增量门禁及严格读取／资源取回实测
 make portable        # 存储／BLE 固定消费者、布局和链接／局部帧证据
+make assets-input    # 素材／输入固定消费者、容量对照及不使用新库的链接检查
 make ui-low-memory   # 持续验证应用示例的真实 32／8 像素两档
 make packages        # 检查 Cargo 计划打包的文件，不发布
 make supply-chain    # 依赖许可证、advisory 和依赖来源检查

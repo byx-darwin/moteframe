@@ -25,7 +25,7 @@ def read_layout(ir, names):
     """Require exactly one compiler-emitted byte-array size per named layout."""
     result = {}
     for name in names:
-        matches = re.findall(r"^@[^\s=]*" + re.escape(name) + r"[^\s=]*\s*=.*?constant \[(\d+) x i8\]", ir, re.M)
+        matches = re.findall(r"^@[^\s=]*" + re.escape(name) + r'"?\s*=.*?constant \[(\d+) x i8\]', ir, re.M)
         if len(matches) != 1:
             raise ValueError("missing or duplicate compiler layout: " + name)
         result[name] = int(matches[0])

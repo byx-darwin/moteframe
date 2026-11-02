@@ -34,6 +34,10 @@ class MemoryTests(unittest.TestCase):
         ir = '@_R42MF_PIXEL_RGB565 = constant [2 x i8] zeroinitializer, align 1\n'
         self.assertEqual(MODULE.read_layout(ir, {"MF_PIXEL_RGB565"}), {"MF_PIXEL_RGB565": 2})
 
+    def test_should_distinguish_exact_marker_from_longer_prefixed_marker(self):
+        ir='@MODULE_TOUCH = constant [56 x i8] zeroinitializer\n@MODULE_TOUCH_QUEUE = constant [16 x i8] zeroinitializer\n'
+        self.assertEqual(MODULE.read_layout(ir,{'MODULE_TOUCH','MODULE_TOUCH_QUEUE'}),{'MODULE_TOUCH':56,'MODULE_TOUCH_QUEUE':16})
+
     def test_should_reject_missing_or_duplicate_layout_globals(self):
         with self.assertRaises(ValueError):
             MODULE.read_layout("", {"MF_PIXEL_RGB565"})

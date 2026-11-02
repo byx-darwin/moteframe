@@ -8,7 +8,7 @@ import re
 import subprocess
 import sys
 
-PACKAGES = {"moteframe-core", "moteframe-ui", "moteframe-display", "moteframe-i2c", "moteframe-storage", "moteframe-ble"}
+PACKAGES = {"moteframe-core", "moteframe-ui", "moteframe-display", "moteframe-i2c", "moteframe-storage", "moteframe-ble", "moteframe-assets", "moteframe-input"}
 UPSTREAM = {"embedded-hal", "embedded-graphics", "embedded-graphics-core"}
 RESOLVED_UPSTREAM = UPSTREAM | {
     "autocfg", "az", "byteorder", "embedded-graphics-core", "float-cmp", "micromath", "num-traits",
@@ -24,8 +24,10 @@ RUST_FILES = {
     },
     "moteframe-display": {"src/lib.rs", "src/spi.rs", "src/shared.rs", "tests/recovery.rs", "tests/shared.rs", "tests/spi.rs", "tests/stream.rs"},
     "moteframe-i2c": {"src/lib.rs", "src/resources.rs", "src/checked.rs", "tests/read.rs", "tests/extensions.rs", "tests/wire.rs"},
-    "moteframe-storage": {"src/lib.rs", "tests/read.rs"},
-    "moteframe-ble": {"src/lib.rs", "tests/values.rs"},
+    "moteframe-storage": {"src/lib.rs", "tests/read.rs", "tests/debug.rs"},
+    "moteframe-ble": {"src/lib.rs", "tests/values.rs", "tests/debug.rs"},
+    "moteframe-assets": {"src/lib.rs", "src/raster.rs", "src/formats.rs", "tests/raster.rs", "tests/ui.rs"},
+    "moteframe-input": {"src/lib.rs", "src/queue.rs", "src/button.rs", "src/touch.rs", "tests/input.rs"},
 }
 ROOT_FILES = {
     ".gitignore", ".pre-commit-config.yaml", ".typos.toml", ".gitleaks.toml", "CLAUDE.md", "Cargo.toml",
@@ -40,6 +42,7 @@ ROOT_FILES = {
     "docs/core-extensibility.md",
     "specs/i2c-extensibility.md", "docs/plans/2026-11-03-i2c-extensibility.md", "docs/i2c-extensibility.md",
     "specs/portable-modules.md", "docs/plans/2026-11-03-portable-modules.md", "docs/portable-modules.md",
+    "specs/assets-input.md", "docs/plans/2026-11-03-assets-input.md", "docs/assets-input.md", "docs/public-contracts.md",
     "examples/ui-low-memory/Cargo.toml", "examples/ui-low-memory/Cargo.lock", "examples/ui-low-memory/README.md",
     "examples/ui-low-memory/src/lib.rs", "examples/ui-low-memory/tests/render.rs",
     "docs/ui-memory-profiles.md",
@@ -57,6 +60,7 @@ SCRIPTS = {
     "scripts/probes/i2c_compat.rs", "scripts/i2c-compatibility-baseline.json",
     "scripts/check_build_context.py", "scripts/build-context-migrations.json", "scripts/tests/test_build_context.py",
     "scripts/check_ui_low_memory.py", "scripts/check_portable_modules.py", "scripts/probes/portable_modules.rs", "scripts/tests/test_portable_modules.py",
+    "scripts/check_assets_input.py", "scripts/probes/assets_input.rs", "scripts/tests/test_assets_input.py",
 }
 BINARY_SUFFIXES = {".bin", ".lib", ".a", ".elf", ".hex", ".pdf", ".doc", ".docx", ".png", ".jpg", ".zip", ".7z", ".rar", ".pem", ".key"}
 
@@ -100,6 +104,8 @@ def validate_files(root):
             relative = path.relative_to(root).as_posix()
             if path.is_symlink():
                 errors.append("symlink: " + relative)
+                continue
+            if relative == ".git":  # Root Git worktree pointer; never a distribution input.
                 continue
             if name == ".DS_Store" or path.suffix == ".pyc":
                 continue

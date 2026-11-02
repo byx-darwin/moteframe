@@ -47,9 +47,16 @@ fn checked_range(capacity: u32, offset: u32, length: u32) -> Result<u32, RangeEr
 }
 
 /// An exact-read view over an immutable slice of at most `u32::MAX` bytes.
-#[derive(Debug)]
 pub struct SliceSource<'a> {
     bytes: &'a [u8],
+}
+
+impl fmt::Debug for SliceSource<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SliceSource")
+            .field("length", &self.bytes.len())
+            .finish_non_exhaustive()
+    }
 }
 
 impl<'a> SliceSource<'a> {
@@ -91,9 +98,14 @@ impl ReadAt for SliceSource<'_> {
 /// Explicitly forwards reads through a mutable borrow, including a `dyn` source.
 ///
 /// This wrapper adds no validation or retry and retains no output borrow.
-#[derive(Debug)]
 pub struct ReadRef<'a, R: ?Sized> {
     inner: &'a mut R,
+}
+
+impl<R: ?Sized> fmt::Debug for ReadRef<'_, R> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ReadRef").finish_non_exhaustive()
+    }
 }
 
 impl<'a, R: ?Sized> ReadRef<'a, R> {
@@ -160,11 +172,19 @@ impl<R> fmt::Debug for WindowCreateError<R> {
 /// Growth never enlarges this view. Shrink rejects affected nonempty reads
 /// before provider I/O; valid empty reads still succeed anywhere through the
 /// logical end, even when the provider has shrunk below the window's start.
-#[derive(Debug)]
 pub struct ReadWindow<R: ReadAt> {
     inner: R,
     start: u32,
     length: u32,
+}
+
+impl<R: ReadAt> fmt::Debug for ReadWindow<R> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ReadWindow")
+            .field("start", &self.start)
+            .field("length", &self.length)
+            .finish_non_exhaustive()
+    }
 }
 
 impl<R: ReadAt> ReadWindow<R> {

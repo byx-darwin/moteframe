@@ -25,10 +25,21 @@ class PackageTests(unittest.TestCase):
 
     def test_should_accept_portable_storage_and_ble_packages(self):
         for package, test in [("moteframe-storage", "read"), ("moteframe-ble", "values")]:
-            files = ["Cargo.toml", "Cargo.lock", "README.md", "LICENSE", "NOTICE", "src/lib.rs", f"tests/{test}.rs"]
+            files = ["Cargo.toml", "Cargo.lock", "README.md", "LICENSE", "NOTICE", "src/lib.rs", f"tests/{test}.rs", "tests/debug.rs"]
             with self.subTest(package=package):
                 self.assertEqual(MODULE.validate_package(package, files), [])
                 self.assertTrue(MODULE.validate_package(package, files + ["src/vendor.rs"]))
+
+    def test_should_require_assets_input_behavior_tests_and_reject_private_resources(self):
+        for package,source in [
+            ("moteframe-assets",["src/lib.rs","src/formats.rs","src/raster.rs","tests/raster.rs","tests/ui.rs"]),
+            ("moteframe-input",["src/lib.rs","src/queue.rs","src/button.rs","src/touch.rs","tests/input.rs"]),
+        ]:
+            files=["Cargo.toml","README.md","LICENSE","NOTICE",*source]
+            with self.subTest(package=package):
+                self.assertEqual(MODULE.validate_package(package,files),[])
+                self.assertTrue(MODULE.validate_package(package,files+["resources/original.bin"]))
+                self.assertTrue(MODULE.validate_package(package,[f for f in files if f!=source[-1]]))
 
     def test_should_reject_missing_license_texts(self):
         self.assertTrue(MODULE.validate_package("moteframe-core", [f for f in self.files if f != "LICENSE"]))

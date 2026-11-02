@@ -1,9 +1,9 @@
 PYTHON ?= python3
 TARGET ?= thumbv6m-none-eabi
 
-.PHONY: check fmt format lint test doc boundary python-tests build example memory ui-config core-compat i2c-compat portable ui-low-memory packages independent supply-chain secrets hooks-install hooks
+.PHONY: check fmt format lint test doc boundary python-tests build example memory ui-config core-compat i2c-compat portable assets-input ui-low-memory packages independent supply-chain secrets hooks-install hooks
 
-check: fmt lint test doc boundary python-tests example memory ui-config ui-low-memory core-compat i2c-compat portable packages independent
+check: fmt lint test doc boundary python-tests example memory ui-config ui-low-memory core-compat i2c-compat portable assets-input packages independent
 
 fmt:
 	cargo fmt --all -- --check
@@ -52,6 +52,9 @@ ui-low-memory:
 portable:
 	$(PYTHON) scripts/check_portable_modules.py
 
+assets-input:
+	$(PYTHON) scripts/check_assets_input.py
+
 packages:
 	$(PYTHON) scripts/check_packages.py
 
@@ -65,6 +68,8 @@ independent:
 	cargo test --manifest-path crates/moteframe-i2c/Cargo.toml --all-targets --offline --locked
 	cargo test --manifest-path crates/moteframe-storage/Cargo.toml --all-targets --offline --locked
 	cargo test --manifest-path crates/moteframe-ble/Cargo.toml --all-targets --offline --locked
+	cargo test --manifest-path crates/moteframe-assets/Cargo.toml --all-targets --offline --locked
+	cargo test --manifest-path crates/moteframe-input/Cargo.toml --all-targets --offline --locked
 
 supply-chain:
 	cargo deny --offline --locked check --disable-fetch

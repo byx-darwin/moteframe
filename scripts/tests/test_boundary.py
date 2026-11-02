@@ -56,6 +56,12 @@ class BoundaryTests(unittest.TestCase):
                 self.write("docs/" + directory + "/private.png", "private")
                 self.assertTrue(any("binary/resource" in e for e in BOUNDARY.validate_files(self.root)))
 
+    def test_should_ignore_only_root_worktree_git_pointer_not_nested_files(self):
+        self.write(".git", "gitdir: /local/vcs/metadata\n")
+        self.assertEqual(BOUNDARY.validate_files(self.root), [])
+        self.write("docs/.git", "private text")
+        self.assertTrue(any("outside portable scope: docs/.git" in e for e in BOUNDARY.validate_files(self.root)))
+
     def test_should_reject_symlinks_under_nested_artifact_directories(self):
         for directory in ["target", ".superpowers"]:
             with self.subTest(directory=directory):

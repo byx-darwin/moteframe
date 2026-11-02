@@ -1,7 +1,7 @@
 # MoteFrame contributor and agent rules
 
 - Scope: portable interfaces, drawing, generic display transport, buses,
-  read-only storage views, and bounded BLE value handling.
+  read-only storage views, bounded BLE value handling, source-backed assets and normalized input state machines.
 - Keep runtime crates `no_std`, allocation-free, and `forbid(unsafe_code)`.
 - Product applications, chip registers, board wiring, radio implementations,
   panel-specific initialization, original assets, vendor files, and device dumps
@@ -25,6 +25,7 @@
 - Test behavior, errors and boundaries; carry the existing regressions with
   extracted implementations. New behavior needs a failing test first.
 - Public APIs need documentation, explicit errors and `Debug` implementations.
+  Byte/event containers redact payloads, routing identities and backend internals from Debug.
   No `todo!`, `unimplemented!`, production `unwrap`/`expect`, or hidden failures.
 - Apply Conventional Commits. Keep secrets and private paths out of source,
   documentation, examples, logs intended for distribution, and commit messages.
