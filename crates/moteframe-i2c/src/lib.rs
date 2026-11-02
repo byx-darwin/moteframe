@@ -6,7 +6,14 @@
 #![no_std]
 #![forbid(unsafe_code)]
 
+mod checked;
+mod resources;
+pub use checked::CheckedReadError;
+pub use resources::{InitError, NormalAddress7};
+
 /// Open-drain wire; release never actively drives a high level.
+/// All calls must finish within the platform's finite wait budget. This trait
+/// cannot interrupt a blocking GPIO implementation or report GPIO errors.
 pub trait Line {
     /// Pull the wire low.
     fn low(&mut self);
@@ -28,6 +35,8 @@ pub enum I2cError {
     ClockTimeout,
 }
 /// Generic software bus; delay is one caller-chosen half-cycle, not a calibrated rate.
+/// The callback must have a finite completion budget. The caller ensures
+/// exclusive single-controller access; errors do not latch a fault or retry.
 #[derive(Debug)]
 pub struct BitBangI2c<C, D, F> {
     clock: C,
@@ -141,11 +150,16 @@ impl<C: Line, D: Line, F: FnMut()> BitBangI2c<C, D, F> {
         }
         Ok(())
     }
-    /// Reads normal8-bit registers with STOP between pointer write and read START.
+    /// Reads 8-bit register pointers with STOP between pointer write and read START.
     /// The only writes are the address and register pointer, never controller payloads.
+    /// Raw seven-bit addresses include special uses such as General Call, whose
+    /// pointer byte may have broadcast side effects. Prefer `read_normal` or
+    /// `read_checked` with `NormalAddress7` for ordinary targets.
     /// # Errors
     /// Rejects non7-bit addresses/empty reads and propagates ACK or clock failures.
-    /// Both wires are released on return; an errored output slice must be discarded.
+    /// Valid requests attempt a final STOP and release master outputs; actual
+    /// idle is not checked. Busy also runs cleanup. Invalid requests do no I/O.
+    /// An errored output slice must be discarded, even if already filled.
     pub fn read(&mut self, address: u8, register: u8, out: &mut [u8]) -> Result<(), I2cError> {
         if address >= 128 || out.is_empty() {
             return Err(I2cError::Invalid);

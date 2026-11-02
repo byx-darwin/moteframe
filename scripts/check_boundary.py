@@ -8,22 +8,24 @@ import re
 import subprocess
 import sys
 
-PACKAGES = {"moteframe-core", "moteframe-ui", "moteframe-display", "moteframe-i2c"}
+PACKAGES = {"moteframe-core", "moteframe-ui", "moteframe-display", "moteframe-i2c", "moteframe-storage", "moteframe-ble"}
 UPSTREAM = {"embedded-hal", "embedded-graphics", "embedded-graphics-core"}
 RESOLVED_UPSTREAM = UPSTREAM | {
     "autocfg", "az", "byteorder", "embedded-graphics-core", "float-cmp", "micromath", "num-traits",
 }
 REGISTRY = "registry+https://github.com/rust-lang/crates.io-index"
 RUST_FILES = {
-    "moteframe-core": {"src/lib.rs", "src/read.rs", "src/spi.rs", "tests/shared_spi.rs"},
+    "moteframe-core": {"src/lib.rs", "src/read.rs", "src/spi.rs", "src/hal.rs", "tests/hal.rs", "tests/recovery.rs", "tests/shared_spi.rs", "tests/faults.rs"},
     "moteframe-ui": {
         "src/lib.rs", "src/geometry.rs", "src/layout.rs", "src/refresh.rs", "src/stream.rs",
         "tests/damage.rs", "tests/refresh.rs", "tests/cooperative.rs", "tests/foundation.rs",
         "tests/dcs.rs", "tests/colors.rs", "tests/configuration.rs", "tests/session.rs", "tests/pacing.rs", "tests/run.rs",
         "examples/config_memory.rs", "src/configuration.rs", "src/resources.rs", "src/session.rs", "src/pacing.rs", "examples/offline.rs", "examples/memory.rs",
     },
-    "moteframe-display": {"src/lib.rs", "src/spi.rs", "src/shared.rs", "tests/shared.rs", "tests/spi.rs", "tests/stream.rs"},
-    "moteframe-i2c": {"src/lib.rs", "tests/read.rs"},
+    "moteframe-display": {"src/lib.rs", "src/spi.rs", "src/shared.rs", "tests/recovery.rs", "tests/shared.rs", "tests/spi.rs", "tests/stream.rs"},
+    "moteframe-i2c": {"src/lib.rs", "src/resources.rs", "src/checked.rs", "tests/read.rs", "tests/extensions.rs", "tests/wire.rs"},
+    "moteframe-storage": {"src/lib.rs", "tests/read.rs"},
+    "moteframe-ble": {"src/lib.rs", "tests/values.rs"},
 }
 ROOT_FILES = {
     ".gitignore", ".pre-commit-config.yaml", ".typos.toml", ".gitleaks.toml", "CLAUDE.md", "Cargo.toml",
@@ -34,6 +36,13 @@ ROOT_FILES = {
     "docs/plans/2026-11-02-foundation-extraction.md", "specs/foundation-extraction.md",
     "docs/plans/2026-11-02-publication.md",
     "specs/color-types.md", "docs/plans/2026-11-02-color-types.md", "docs/color-types.md",
+    "specs/core-extensibility.md", "docs/plans/2026-11-02-core-extensibility.md",
+    "docs/core-extensibility.md",
+    "specs/i2c-extensibility.md", "docs/plans/2026-11-03-i2c-extensibility.md", "docs/i2c-extensibility.md",
+    "specs/portable-modules.md", "docs/plans/2026-11-03-portable-modules.md", "docs/portable-modules.md",
+    "examples/ui-low-memory/Cargo.toml", "examples/ui-low-memory/Cargo.lock", "examples/ui-low-memory/README.md",
+    "examples/ui-low-memory/src/lib.rs", "examples/ui-low-memory/tests/render.rs",
+    "docs/ui-memory-profiles.md",
     "docs/ui-configuration-review-r02.md", "docs/ui-configuration-implementation.md", "docs/ui-configuration.md", "docs/plans/2026-11-02-ui-configuration.md",
 }
 SCRIPTS = {
@@ -42,6 +51,12 @@ SCRIPTS = {
     "scripts/tests/test_commit_message.py", "scripts/tests/test_example.py",
     "scripts/tests/test_packages.py",
     "scripts/check_memory.py", "scripts/tests/test_memory.py", "scripts/check_ui_configuration.py", "scripts/check_ui_memory.py", "scripts/tests/test_ui_memory.py", "scripts/tests/test_ui_configuration.py",
+    "scripts/check_core_compatibility.py", "scripts/tests/test_core_compatibility.py",
+    "scripts/probes/core_compat.rs", "scripts/core-compatibility-baseline.json",
+    "scripts/check_i2c_compatibility.py", "scripts/tests/test_i2c_compatibility.py",
+    "scripts/probes/i2c_compat.rs", "scripts/i2c-compatibility-baseline.json",
+    "scripts/check_build_context.py", "scripts/build-context-migrations.json", "scripts/tests/test_build_context.py",
+    "scripts/check_ui_low_memory.py", "scripts/check_portable_modules.py", "scripts/probes/portable_modules.rs", "scripts/tests/test_portable_modules.py",
 }
 BINARY_SUFFIXES = {".bin", ".lib", ".a", ".elf", ".hex", ".pdf", ".doc", ".docx", ".png", ".jpg", ".zip", ".7z", ".rar", ".pem", ".key"}
 
@@ -77,6 +92,8 @@ def validate_files(root):
                 errors.append("symlink: " + path.relative_to(root).as_posix())
                 directories.remove(name)
             elif name == "__pycache__" or (base == root and name in {".git", "target", ".superpowers"}):
+                directories.remove(name)
+            elif path.relative_to(root).as_posix() == "examples/ui-low-memory/target":
                 directories.remove(name)
         for name in files:
             path = base / name

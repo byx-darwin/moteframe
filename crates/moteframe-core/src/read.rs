@@ -4,6 +4,11 @@
 
 //! Bounded exact reads; no write, erase or mutable memory interface.
 /// Offset-based read-only byte source. An errored output must be discarded.
+///
+/// Validate the entire range, including length conversion and offset overflow,
+/// before I/O. Empty reads at `offset <= capacity()` succeed without I/O; an
+/// offset beyond capacity is invalid even for an empty read. Return within a
+/// finite platform-defined budget; do not retain the output slice after return.
 pub trait ReadAt {
     /// Source failure.
     type Error;

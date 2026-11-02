@@ -1,10 +1,14 @@
 # MoteFrame contributor and agent rules
 
-- Scope: portable interfaces, drawing, generic display transport, and buses.
+- Scope: portable interfaces, drawing, generic display transport, buses,
+  read-only storage views, and bounded BLE value handling.
 - Keep runtime crates `no_std`, allocation-free, and `forbid(unsafe_code)`.
 - Product applications, chip registers, board wiring, radio implementations,
   panel-specific initialization, original assets, vendor files, and device dumps
   belong outside this repository.
+- Storage/BLE here are portable sources/views and checked application-value
+  adapters. Physical Flash drivers, BLE host/controller/radio stacks, pairing,
+  private product protocols and business persistence remain outside this repo.
 - Use `embedded-hal` and `embedded-graphics`; avoid duplicate abstractions when
   their existing contracts apply. Runtime crates must not depend on `std`.
 - Preserve synchronous completion, bounded I/O obligations, first-error

@@ -142,7 +142,8 @@ pub enum BindingState {
 pub enum DrawOutcome {
     /// Clean; no scene/write/service or clock sample.
     Idle,
-    /// This frame completed; future requests may still be pending.
+    /// This frame's logical writes completed; future requests may be pending.
+    /// This does not imply optical visibility or an adapter-specific present.
     Drawn,
     /// Interval has not elapsed; no scene, write or service was called.
     #[cfg(feature = "frame-pacing")]

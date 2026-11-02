@@ -30,7 +30,7 @@ class BoundaryTests(unittest.TestCase):
 
     def metadata(self):
         packages = []
-        for name in ["moteframe-core", "moteframe-display", "moteframe-ui", "moteframe-i2c"]:
+        for name in sorted(BOUNDARY.PACKAGES):
             packages.append({
                 "id": name,
                 "name": name,
@@ -71,6 +71,17 @@ class BoundaryTests(unittest.TestCase):
     def test_should_reject_forced_tracking_of_excluded_artifacts(self):
         errors = BOUNDARY.validate_tracked(["target/private.bin", ".superpowers/private.md"])
         self.assertEqual(len(errors), 2)
+
+    def test_should_ignore_only_the_reviewed_standalone_example_build_directory(self):
+        self.write("examples/ui-low-memory/target/private.bin", "local build")
+        self.assertEqual(BOUNDARY.validate_files(self.root), [])
+        self.write("examples/other/target/private.bin", "unreviewed")
+        self.assertTrue(BOUNDARY.validate_files(self.root))
+
+    def test_should_reject_extra_workspace_members(self):
+        metadata = self.metadata()
+        metadata["workspace_members"].append("unreviewed")
+        self.assertTrue(BOUNDARY.validate_metadata(metadata, self.root))
 
     def test_should_accept_only_reviewed_tracked_paths(self):
         self.assertEqual(BOUNDARY.validate_tracked(["README.md", "crates/moteframe-core/src/lib.rs"]), [])

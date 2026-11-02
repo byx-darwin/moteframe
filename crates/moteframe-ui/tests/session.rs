@@ -454,6 +454,9 @@ impl moteframe_core::ReadAt for Reader {
         let offset = usize::try_from(offset).map_err(|_| AssetError::Read)?;
         let end = offset.checked_add(out.len()).ok_or(AssetError::Read)?;
         let bytes = self.bytes.get(offset..end).ok_or(AssetError::Read)?;
+        if out.is_empty() {
+            return Ok(());
+        }
         self.calls += 1;
         if self.fail_at == Some(self.calls) {
             out.fill(255);

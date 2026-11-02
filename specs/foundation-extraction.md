@@ -46,3 +46,13 @@ material receives no redistribution authorization.
 - Supply-chain and secret scans pass, with any incomplete check reported.
 - Commit only reviewed portable files, upload to the named GitHub repository,
   make it public, and verify its exact commit and anonymously readable license/notices.
+
+## 2026-11-03 approved portable extensions
+
+The exclusions above describe the initial extraction. The user subsequently
+approved moteframe-storage read-only sources/views and moteframe-ble bounded
+GATT value adapters. These are independent optional-by-dependency modules; they
+do not import physical Flash drivers, BLE host/controller/radio implementations,
+product persistence, protocols, algorithms, vendor resources or private assets.
+Current contracts and compatibility evidence: specs/portable-modules.md and
+docs/portable-modules.md.

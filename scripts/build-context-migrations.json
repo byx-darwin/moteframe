@@ -1,0 +1,59 @@
+{
+  "format_version": 1,
+  "transitions": [
+    {
+      "after": {
+        "lock_sha256": "915d5ee8a917c839df53a20e7efa594d322b2ebbfa189b84cdc0d94351ff3cbd",
+        "manifests": {
+          "Cargo.toml": "95a8d70b36662a73c951aeecb73ee9df02dda250d30aea5b29f2e380d28e8a9e",
+          "crates/moteframe-ble/Cargo.toml": "5f243158ca66b70d005e315d4dd13fc44b19c8a2ae986489247d6c32e94e3490",
+          "crates/moteframe-core/Cargo.toml": "703484b66b8b7b3a70d6ecdb95afe029cf313c7148d457771255575bc3abb955",
+          "crates/moteframe-display/Cargo.toml": "a1b289c84c3b1c0fb9f4037af78e3f80917477504ba30cca7f4e361a5cd7fb5b",
+          "crates/moteframe-i2c/Cargo.toml": "c5061af2f9a4afccae332931d6da8308e50f2ea10d635be1e34235c4f11939ba",
+          "crates/moteframe-storage/Cargo.toml": "97335ccee642bfe6bd204db91882c48944c30d716d06d03bb7713d7af6c3ef93",
+          "crates/moteframe-ui/Cargo.toml": "8969a803131418b3ff9bfd0d02ed8b02f1d10298411c9fc21fbc97c12b744319"
+        }
+      },
+      "before": {
+        "lock_sha256": "a2adbb726e5202257b953f260711876397dad932e2636ce557a43d928b9fb628",
+        "manifests": {
+          "Cargo.toml": "f90806dfe1653b336172778bdd433f0b847e3b8fb8b53df7c7ba60c213319dde",
+          "crates/moteframe-core/Cargo.toml": "703484b66b8b7b3a70d6ecdb95afe029cf313c7148d457771255575bc3abb955",
+          "crates/moteframe-display/Cargo.toml": "a1b289c84c3b1c0fb9f4037af78e3f80917477504ba30cca7f4e361a5cd7fb5b",
+          "crates/moteframe-i2c/Cargo.toml": "c5061af2f9a4afccae332931d6da8308e50f2ea10d635be1e34235c4f11939ba",
+          "crates/moteframe-ui/Cargo.toml": "8969a803131418b3ff9bfd0d02ed8b02f1d10298411c9fc21fbc97c12b744319"
+        }
+      },
+      "name": "portable-storage-ble-2026-11-03-core",
+      "reason": "Add two independent optional-by-dependency crates only; original compiler/profile/probes/configuration and every legacy resource/behavior/layout budget remain enforced.",
+      "reference_sha256": "0ed2ec51e890d2f5ab71e6eb5cf9c6625a121057edf40bbe7f595dc6f73562c7"
+    },
+    {
+      "after": {
+        "lock_sha256": "915d5ee8a917c839df53a20e7efa594d322b2ebbfa189b84cdc0d94351ff3cbd",
+        "manifests": {
+          "Cargo.toml": "95a8d70b36662a73c951aeecb73ee9df02dda250d30aea5b29f2e380d28e8a9e",
+          "crates/moteframe-ble/Cargo.toml": "5f243158ca66b70d005e315d4dd13fc44b19c8a2ae986489247d6c32e94e3490",
+          "crates/moteframe-core/Cargo.toml": "703484b66b8b7b3a70d6ecdb95afe029cf313c7148d457771255575bc3abb955",
+          "crates/moteframe-display/Cargo.toml": "a1b289c84c3b1c0fb9f4037af78e3f80917477504ba30cca7f4e361a5cd7fb5b",
+          "crates/moteframe-i2c/Cargo.toml": "c5061af2f9a4afccae332931d6da8308e50f2ea10d635be1e34235c4f11939ba",
+          "crates/moteframe-storage/Cargo.toml": "97335ccee642bfe6bd204db91882c48944c30d716d06d03bb7713d7af6c3ef93",
+          "crates/moteframe-ui/Cargo.toml": "8969a803131418b3ff9bfd0d02ed8b02f1d10298411c9fc21fbc97c12b744319"
+        }
+      },
+      "before": {
+        "lock_sha256": "a2adbb726e5202257b953f260711876397dad932e2636ce557a43d928b9fb628",
+        "manifests": {
+          "Cargo.toml": "f90806dfe1653b336172778bdd433f0b847e3b8fb8b53df7c7ba60c213319dde",
+          "crates/moteframe-core/Cargo.toml": "703484b66b8b7b3a70d6ecdb95afe029cf313c7148d457771255575bc3abb955",
+          "crates/moteframe-display/Cargo.toml": "a1b289c84c3b1c0fb9f4037af78e3f80917477504ba30cca7f4e361a5cd7fb5b",
+          "crates/moteframe-i2c/Cargo.toml": "c5061af2f9a4afccae332931d6da8308e50f2ea10d635be1e34235c4f11939ba",
+          "crates/moteframe-ui/Cargo.toml": "8969a803131418b3ff9bfd0d02ed8b02f1d10298411c9fc21fbc97c12b744319"
+        }
+      },
+      "name": "portable-storage-ble-2026-11-03-i2c",
+      "reason": "Add two independent optional-by-dependency crates only; original compiler/profile/probes/configuration and every legacy resource/behavior/layout budget remain enforced.",
+      "reference_sha256": "f9f7035dcb72ab303a0ea92320c6992c371539f6277445489e1caa14b36c0adc"
+    }
+  ]
+}

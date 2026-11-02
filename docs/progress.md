@@ -128,3 +128,103 @@ Plan: `docs/plans/2026-11-02-foundation-extraction.md`.
   Retain Apache-2.0 and canonical NOTICE in all four crates.
 - Refresh color probe numbers against the combined 0.2 source. These are offline
   object/link/layout observations, not product/device qualification.
+
+## Core extensibility and resource recovery
+
+- Owner approved the multi-role incremental proposal and requested implementation.
+  Work is on local `codex/core-extensibility`, preserving earlier README edits.
+- Added explicit embedded-hal 1.0 bus/pin/delay bridges; old traits, construction
+  signatures, errors and RGB565 driver scope remain unchanged. SPI bridge writes
+  once, attempts flush even on failure and retains the first error.
+- Added pin-preserving try_device and consuming core/device/shared-panel resource
+  reclamation. Extraction does no I/O and is not hardware recovery or fault reset.
+- Clarified Display completion vs optical visibility, finite waits, Result-only
+  cleanup and ReadAt empty-range behavior; no new storage backend or product code.
+- New `make core-compat` is part of `make check`, including real consumers,
+  consumer-owned E0505 rejection and frozen linked Cortex-M0 cost evidence.
+- Legacy dedicated/shared consumers: Flash/static RAM/local frame deltas all 0.
+  Owned HAL bridge matches correct manual bridge; borrowed variant -36 B Flash
+  but +16 B exercise frame. Opt-in recovery workloads are reported separately,
+  not treated as equivalent DCS comparisons or accepted product stack budgets.
+- Fresh final review found two Important evidence-gate gaps, both corrected
+  after failing regressions: explicit/fingerprinted build configuration, and
+  immutable complete baseline provenance including display/workspace manifests.
+- Corrected-tree `make check build` passed: 91 maintained Rust and 67 Python
+  tests, existing feature matrix/probes, new consumers/cost gates and package
+  boundaries. Offline dependency policy, secrets, spelling and diff checks passed.
+- No new dependencies, hardware, staging, commit, push, tag or publication.
+  See `docs/core-extensibility.md`; full local evidence remains ignored in target.
+
+## Stack-cost follow-up
+
+- Rechecked the identical workload using full ownership, all borrowed objects,
+  and only borrowed SPI: exercise frames 160/176/168 B, linked Flash
+  1314/1278/1324 B. Executed output checksums are identical.
+- The all-owned form saves 16 B local frame at +36 B Flash compared with all
+  borrowed; borrowing only SPI saves 8 B at +46 B Flash. These are fixed offline
+  fixture results, not arbitrary HAL or complete-product stack guarantees.
+- Three temporary inlining variants did not reduce the borrowed exercise frame
+  and were not adopted. No runtime code, buffers or completion/error contracts
+  changed; added the ownership trade-off to the integration guide only.
+
+## UI memory-profile study
+
+- Evaluated 14 fixed-workload cases (7 capacity/storage combinations, with and
+  without compiled pacing) and four seeds, including accepted pixel output,
+  final image, failures/retry, future requests, idle and capacity rejection.
+- Both stream and refresh checksums remain observable, preventing unused early
+  drawing from disappearing. Final default 32/8 results: UI object budgets
+  144/96 B, exercise frames 288/240 B, linked Flash 1452/1290 B. A 64x8 frame
+  requires 16/64 write and service calls. This is not a measured latency ratio.
+- Tile-only limit changes leave the 32-pixel array and object budget unchanged.
+  Bundling caller state/scratch does not remove the existing session's borrows.
+- Actual application-local compile-switch consumers built in both configurations
+  for Cortex-M0; existing 63 maintained UI tests passed. No new library feature,
+  runtime modification, hardware or private-product integration.
+- Documented the recommended explicit 8/32 compile-time capacity selection in
+  docs/ui-memory-profiles.md. Scratch study artifacts remain ignored in target,
+  outside source packages and continuous CI.
+
+## I²C compatibility extensions (2026-11-03)
+
+- Implemented assessment stage A: ordinary NormalAddress7/read_normal, opt-in
+  read_checked with both STOP idle observations, and resource-preserving
+  try_new/InitError/into_parts. Legacy Line/new/read/I2cError and instance fields
+  remain compatible; no dependency, heap, retry, poison or hardware additions.
+- Promoted line-state fixtures: multi-byte ACK/NACK, all 49 SCL wait failures,
+  both STOP SDA holds, post-STOP SCL drop, final-budget release and error cleanup.
+  Added core select/operation/flush/release 16-combination regression.
+- Added frozen I2C legacy resource/behavior gate to make check and existing CI.
+  Legacy/normal fixed consumers: Flash 1226 B, exercise frame 72 B, static RAM
+  0 B, legacy deltas all 0. Checked consumer: Flash 1356 B (+130), frame 80 B
+  (+8), static RAM 0 B. Separate recovery workload: 104 B Flash / 28 B frame.
+- Full make check build passed: 111 maintained Rust tests and 77 Python tests,
+  feature consumers, Cortex-M0 probes/build, source/package boundaries and docs.
+  Fresh review found one Important compiler-wrapper environment bypass; failing
+  core/I2C regressions reproduced it, and the shared guard now rejects Cargo
+  compiler aliases, target-specific flags and incremental overrides.
+- Usage, budgets and limitations: docs/i2c-extensibility.md. Stage B HAL backend
+  and stage C full software transactions remain deferred. No staging, commit,
+  push, publication or hardware qualification.
+
+## Portable storage / BLE and maintained RAM example (2026-11-03)
+
+- Three-role assessment selected independent read-only storage views and bounded
+  GATT value handling; physical Flash, BLE stacks/radio and product protocols stay
+  external. No new upstream dependency or core/UI dependency on these modules.
+- Storage adds SliceSource/ReadRef/ReadWindow and failure-preserving ownership.
+  BLE adds checked notification admission and complete-event WriteSlot buffers.
+  Existing public trait requirements, defaults and legacy error enums are unchanged.
+- Maintained examples/ui-low-memory owns the application-only 8/32 switch,
+  actual arrays/stream runs and typed errors/pending-work reports. Four final
+  images match in both modes, with 14 behavior tests per mode and ARM builds.
+- Original core/I2C frozen references remain byte-identical; exact reviewed Cargo
+  graph migration admits the two new members without relaxing build/probe/context
+  or resource checks. Every legacy Flash/static-RAM/local-frame delta remains 0.
+- Fresh storage, BLE, RAM, integration and broad final reviews found no actionable
+  issues. Full make check build passed: 148 workspace Rust tests, 89 Python tests,
+  both RAM profiles, all consumer/probe/package boundaries and Cortex-M0 build.
+  make supply-chain and make hooks passed, including source secret/spelling checks.
+- Fixed resource reports and scope are documented in docs/portable-modules.md.
+  All measurements are offline synthetic consumers, not hardware qualification,
+  BLE interoperability or whole-firmware/interrupt-stack budgets.

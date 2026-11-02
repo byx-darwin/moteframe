@@ -14,10 +14,21 @@ class PackageTests(unittest.TestCase):
     def setUp(self):
         if MODULE is None:
             self.fail("package candidate validator is not implemented")
-        self.files = ["Cargo.toml", "Cargo.toml.orig", "Cargo.lock", "README.md", "LICENSE", "NOTICE", "src/lib.rs", "src/read.rs", "src/spi.rs", "tests/shared_spi.rs"]
+        self.files = ["Cargo.toml", "Cargo.toml.orig", "Cargo.lock", "README.md", "LICENSE", "NOTICE", "src/lib.rs", "src/read.rs", "src/spi.rs", "src/hal.rs", "tests/hal.rs", "tests/recovery.rs", "tests/shared_spi.rs", "tests/faults.rs"]
 
     def test_should_accept_a_complete_core_package(self):
         self.assertEqual(MODULE.validate_package("moteframe-core", self.files), [])
+
+    def test_should_accept_i2c_extensions_and_maintained_fault_tests(self):
+        files = ["Cargo.toml", "Cargo.lock", "README.md", "LICENSE", "NOTICE", "src/lib.rs", "src/resources.rs", "src/checked.rs", "tests/read.rs", "tests/extensions.rs", "tests/wire.rs"]
+        self.assertEqual(MODULE.validate_package("moteframe-i2c", files), [])
+
+    def test_should_accept_portable_storage_and_ble_packages(self):
+        for package, test in [("moteframe-storage", "read"), ("moteframe-ble", "values")]:
+            files = ["Cargo.toml", "Cargo.lock", "README.md", "LICENSE", "NOTICE", "src/lib.rs", f"tests/{test}.rs"]
+            with self.subTest(package=package):
+                self.assertEqual(MODULE.validate_package(package, files), [])
+                self.assertTrue(MODULE.validate_package(package, files + ["src/vendor.rs"]))
 
     def test_should_reject_missing_license_texts(self):
         self.assertTrue(MODULE.validate_package("moteframe-core", [f for f in self.files if f != "LICENSE"]))

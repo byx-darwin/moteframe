@@ -20,6 +20,14 @@ impl<'a, B, D, C, P> SharedPanelBus<'a, B, D, C, P> {
     pub const fn new(device: Device<'a, B, D, C>, dc: P) -> Self {
         Self { device, dc }
     }
+
+    /// Returns the device and DC pin without I/O or fault recovery.
+    /// Reclaim the device's select before consuming its shared owner. Physical
+    /// pin/controller state after an error must be repaired by board code.
+    #[must_use]
+    pub fn into_parts(self) -> (Device<'a, B, D, C>, P) {
+        (self.device, self.dc)
+    }
 }
 impl<B: SpiBus, D: DelayNs, C: OutputPin, P: OutputPin<Error = C::Error>> DisplayBus
     for SharedPanelBus<'_, B, D, C, P>

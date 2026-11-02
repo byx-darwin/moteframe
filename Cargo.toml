@@ -4,6 +4,8 @@ members = [
     "crates/moteframe-display",
     "crates/moteframe-ui",
     "crates/moteframe-i2c",
+    "crates/moteframe-storage",
+    "crates/moteframe-ble",
 ]
 resolver = "3"
 

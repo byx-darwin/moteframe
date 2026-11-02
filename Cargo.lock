@@ -65,6 +65,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3c8dda44ff03a2f238717214da50f65d5a53b45cd213a7370424ffdb6fae815"
 
 [[package]]
+name = "moteframe-ble"
+version = "0.2.0"
+
+[[package]]
 name = "moteframe-core"
 version = "0.2.0"
 dependencies = [
@@ -83,6 +87,13 @@ dependencies = [
 [[package]]
 name = "moteframe-i2c"
 version = "0.2.0"
+
+[[package]]
+name = "moteframe-storage"
+version = "0.2.0"
+dependencies = [
+ "moteframe-core",
+]
 
 [[package]]
 name = "moteframe-ui"

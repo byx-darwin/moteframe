@@ -70,6 +70,9 @@ impl Rect {
 ///
 /// Commands finish before returning. Consecutive `pixels` calls continue the same
 /// RAM write, including across CS boundaries supported by the selected panel.
+/// This is an 8-bit command/data byte protocol, not every display transport.
+/// All I/O and cleanup must have finite platform-defined waits. Errors may leave
+/// panel state uncertain; an implementation must not silently resend writes.
 pub trait DisplayBus {
     /// Board transport failure.
     type Error;
@@ -84,12 +87,21 @@ pub trait DisplayBus {
 }
 
 /// Millisecond delays supplied by the board, without assuming an RTOS.
+/// Implementations must return after a finite platform-defined wait.
 pub trait DelayMs {
     /// Waits for at least this many milliseconds.
     fn delay_ms(&mut self, milliseconds: u16);
 }
 
 /// Replaceable display interface; no framebuffer or business UI is required.
+///
+/// After any return, the caller may immediately reuse the input pixels.
+/// A successful call finishes its logical write and any synchronous transport
+/// it initiates. This does not promise optical visibility or scan completion,
+/// nor define a separate present/refresh lifecycle for a framebuffer adapter.
+/// Errors may follow partial output; atomic rollback and safe retries are not
+/// implied. Keep dimensions and external command state stable for a frame.
+/// All I/O must return within a finite platform-defined budget.
 pub trait Display {
     /// Logical pixel color. The driver owns its physical encoding.
     type Color: Copy;
@@ -103,7 +115,7 @@ pub trait Display {
     fn write(&mut self, rectangle: Rect, pixels: &[Self::Color]) -> Result<(), Self::Error>;
 }
 
-/// Board startup interface. Display reset/power and BLE boot remain board concerns.
+/// Optional board startup glue. Peripheral reset/power remain board concerns.
 pub trait Board {
     /// A board-specific initialization error.
     type Error;
@@ -114,6 +126,10 @@ pub trait Board {
 }
 
 /// Minimal synchronous SPI write contract. A board may bridge its own HAL here.
+///
+/// Unlike a HAL `SpiBus::write`, successful writes must physically complete
+/// before returning. All operations and cleanup must have finite platform-defined
+/// waits. An error must not cause a hidden resend or retain access to `bytes`.
 pub trait SpiWrite {
     /// SPI failure.
     type Error;
@@ -124,6 +140,7 @@ pub trait SpiWrite {
 }
 
 /// Minimal GPIO output contract for CS/DC wiring.
+/// Level changes must return within a finite platform-defined budget.
 pub trait OutputPin {
     /// GPIO failure.
     type Error;
@@ -135,6 +152,9 @@ pub trait OutputPin {
 
 /// Shared SPI ownership using embedded-hal1 bus/device contracts.
 pub mod spi;
+
+/// Explicit embedded-hal 1.0 bridges preserving the portable contracts.
+pub mod hal;
 
 mod read;
 pub use read::ReadAt;

@@ -1,4 +1,5 @@
 /target/
+/examples/ui-low-memory/target/
 /.superpowers/
 __pycache__/
 *.pyc

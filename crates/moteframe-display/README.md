@@ -14,4 +14,11 @@ No product-specific initialization table or assets are bundled. Synchronous
 transports must fully finish before returning; shared SPI is foreground-only
 and all devices use the same configured mode and frequency.
 
+For explicit recovery, `DcsDisplay::into_bus` returns its transport.
+`SharedPanelBus::into_parts` then returns its device and DC pin; take the CS
+with `Device::into_select`, and reclaim all devices before taking the shared
+controller/delay through `SharedBus::into_parts`. These ownership moves do no
+I/O and do not guarantee idle hardware. Board code repairs/reinitializes it;
+UI sessions must use a fresh generation and explicitly rebind afterward.
+
 Runtime: no_std, no allocation, unsafe forbidden. License: Apache-2.0; see LICENSE and NOTICE.

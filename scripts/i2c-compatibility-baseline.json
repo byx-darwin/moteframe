@@ -1,0 +1,48 @@
+{
+  "baseline_source_sha256": "a1bac9c7682f31c017dd67da2bdd8c13fbace4aa78fd352f462f40b5fc8ea2a7",
+  "cases": {
+    "legacy": {
+      "exercise_frame": 72,
+      "host_outputs": [
+        1347713899,
+        2493535498,
+        4014392173,
+        1093285486,
+        1008476015,
+        669238131,
+        1046721067,
+        1432531530
+      ],
+      "layout": {
+        "I2C_OWNER": 40,
+        "I2C_PIN": 16
+      },
+      "max_local_frame": 72,
+      "sections": {
+        ".bss": 0,
+        ".data": 0,
+        ".rodata": 36,
+        ".text": 1190
+      }
+    }
+  },
+  "environment": {
+    "cargo_configuration": {
+      "manifests": {
+        "Cargo.toml": "f90806dfe1653b336172778bdd433f0b847e3b8fb8b53df7c7ba60c213319dde",
+        "crates/moteframe-core/Cargo.toml": "703484b66b8b7b3a70d6ecdb95afe029cf313c7148d457771255575bc3abb955",
+        "crates/moteframe-display/Cargo.toml": "a1b289c84c3b1c0fb9f4037af78e3f80917477504ba30cca7f4e361a5cd7fb5b",
+        "crates/moteframe-i2c/Cargo.toml": "c5061af2f9a4afccae332931d6da8308e50f2ea10d635be1e34235c4f11939ba",
+        "crates/moteframe-ui/Cargo.toml": "8969a803131418b3ff9bfd0d02ed8b02f1d10298411c9fc21fbc97c12b744319"
+      },
+      "nontransport_configs_sha256": []
+    },
+    "compiler": "rustc 1.96.0 (ac68faa20 2026-05-25)",
+    "linker_sha256": "8633cf185e2c3829e2951927c794eb884528f794639281b24476a9a56d4960d6",
+    "lock_sha256": "a2adbb726e5202257b953f260711876397dad932e2636ce557a43d928b9fb628",
+    "probe_sha256": "d5a6f60f464ce6116407760a58a4e0d34452a8e424a9a98a7c51e3b169888a7a",
+    "profile": "opt-level=s;codegen-units=1;panic=abort;fat-LTO;debug=0;strip=none;overflow-checks=false;debug-assertions=false;incremental=false;fixed-linker;no-layout-statics",
+    "target": "thumbv6m-none-eabi"
+  },
+  "limits": "Fixed synthetic Cortex-M0 linked consumer and object-local frames, not full firmware, IRQ stack or hardware."
+}

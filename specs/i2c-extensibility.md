@@ -1,0 +1,13 @@
+# I²C compatible extensions
+
+Implements stage A of the reviewed 2026-11-02 core/I²C assessment, authorized for implementation on 2026-11-03. Keep the current narrow STOP-separated pointer reader; no generic transaction engine or HAL dependency in this stage.
+
+- Preserve `Line`, `BitBangI2c::new/read`, `I2cError`, object fields and legacy raw-address behavior. No new mandatory trait methods, blanket reference implementations, allocation, unsafe, retry or automatic recovery.
+- Add `NormalAddress7::new(u8) -> Result<Self,I2cError>` accepting only `0x08..=0x77`, and `get() -> u8`. Private field, Copy/Debug/Eq. `read_normal` accepts that type with old completion semantics.
+- Add `read_checked(NormalAddress7,u8,&mut[u8]) -> Result<(),CheckedReadError>`. Errors are `Protocol(I2cError)` and `BusNotIdle`. Check both pointer and final STOP: existing SCL wait and release sequence, then at most polls observations of actual SCL/SDA, with half-cycle a pause after each unsuccessful observation. Simultaneous high is a software observation, not electrical qualification. Preserve the first error, attempt final cleanup on every valid request, reject empty output before I/O, and discard all errored output.
+- Keep checked/legacy methods separately linkable so unused strict logic does not burden legacy consumers; do not add mode/fault fields. No promise of changing old read to verify idle.
+- Add `into_parts(self)->(C,D,F)` without I/O, and `try_new` returning `InitError<C,D,F>` retaining the reason and all resources on zero budget. Accessors `error()` and `into_parts()` expose them. Public Debug must not require GPIO/closure Debug. Legacy new still consumes resources on error.
+- Line operations and delay must themselves finish within platform budgets. The caller configures open drain, samples real input, ensures exclusive single-controller access and investigates failures. Busy still attempts cleanup; no poison is introduced.
+- Promote independent line-level regression fixtures for multi-byte ACK/NACK, all clock-wait fault positions, error precedence, stuck SDA at both STOPs, last polling attempt, invalid zero-I/O and ownership recovery. Add core select/operation/flush/release error matrix, keeping core production unchanged.
+- Freeze pre-change I²C fixed-consumer evidence and enforce unchanged legacy host behavior/layout plus nonpositive Flash/static-RAM/local-frame deltas on thumbv6m-none-eabi. Report strict/new API costs separately, with exact build context. No absolute product or hardware memory promises.
+- Update crate/root READMEs, scope/package allowlists and progress. Run make check build; no commit, staging, push or hardware operation.
