@@ -202,6 +202,141 @@ Cargo feature 在同一依赖图中会合并；其他依赖开启的 UI 功能�
 16／64 次，不表示耗时恰为四倍。历史测量条件、功能合并影响和硬件限制见
 [UI 内存档位验证](docs/ui-memory-profiles.md)。
 
+## 存储与 BLE 配置和接入
+
+两个模块由**设备／固件工程**按依赖选择，目前没有芯片专用 feature，也尚未发布到
+crates.io。下面固定到已验证的源码提交；已有依赖和 `[features]` 时合并条目，保留原默认项：
+
+```toml
+[dependencies]
+moteframe-core = { git = "https://github.com/byx-darwin/moteframe", rev = "23b049d8c9dfa62c5d74855e430e0ec1979c05ca", optional = true }
+moteframe-storage = { git = "https://github.com/byx-darwin/moteframe", rev = "23b049d8c9dfa62c5d74855e430e0ec1979c05ca", optional = true }
+moteframe-ble = { git = "https://github.com/byx-darwin/moteframe", rev = "23b049d8c9dfa62c5d74855e430e0ec1979c05ca", optional = true }
+
+[features]
+storage = ["dep:moteframe-core", "dep:moteframe-storage"]
+ble = ["dep:moteframe-ble"]
+```
+
+这里的 `storage`／`ble` 是固件自己定义的开关。以下代码模块已使用对应 `cfg`，默认不启用；
+在**固件根目录**分别选择模块，以 Cortex-M0 为例：
+
+```sh
+cargo build --release --target thumbv6m-none-eabi --features storage
+cargo build --release --target thumbv6m-none-eabi --features ble
+cargo build --release --target thumbv6m-none-eabi --features storage,ble
+```
+
+首次准备 Git 依赖与固件锁文件需要网络；准备后可附加 `--offline --locked`。
+只使用 BLE 时无需启用 storage／core；storage 的 core 依赖用于复用 `ReadAt`，也便于固件导入该 trait。
+
+### moteframe-storage：存储数据源与资源分区
+
+实际 Flash／存储适配器在设备工程实现 `moteframe_core::ReadAt`：
+
+| 方法 | 适配器负责 |
+| --- | --- |
+| `capacity() -> u32` | 返回可访问字节数 |
+| `read_exact(offset, out)` | I/O 前验证完整范围，在有限时间内精确读取，保留原始错误 |
+
+实现后可借用数据源建立分区视图。示例窗口起点 `0x1000`、长度 `0x4000`，要求数据源初始容量
+至少为 `0x5000`；窗口偏移 0 映射到后端偏移 `0x1000`。按设备资源布局替换这两个参数：
+
+```rust
+#[cfg(feature = "storage")]
+pub mod storage_example {
+    use moteframe_core::ReadAt;
+    use moteframe_storage::{RangeError, ReadError, ReadRef, ReadWindow, SliceSource};
+
+    pub fn read_asset<R: ReadAt>(
+        flash: &mut R,
+        out: &mut [u8],
+    ) -> Result<(), ReadError<R::Error>> {
+        let mut assets = ReadWindow::new(ReadRef::new(flash), 0x1000, 0x4000)
+            .map_err(|error| ReadError::Range(*error.error()))?;
+        assets.read_exact(0, out)
+    }
+
+    // 已有字节切片时，无需 Flash 适配器。
+    pub fn read_slice(bytes: &[u8], out: &mut [u8]) -> Result<(), RangeError> {
+        let mut source = SliceSource::new(bytes)?;
+        source.read_exact(0, out)
+    }
+}
+```
+
+`ReadRef` 只借用原对象，成功或失败返回后调用方仍持有 Flash。直接拥有 source 时，构造失败可用
+`WindowCreateError::into_parts()` 取回原因和原对象；窗口 `into_inner()` 也不执行读传输或恢复。
+后端读错可能已部分修改输出，必须丢弃整个错误输出。当前模块只读，写入、擦除、文件系统和
+产品持久化由设备工程提供。详见 [storage 契约](crates/moteframe-storage/README.md)。
+
+### moteframe-ble：通知发送与完整接收写
+
+设备工程为已有 BLE 栈实现 `NotificationBackend`，关联 `Target` 与原始 `Error` 类型：
+
+| 方法 | 适配器负责 |
+| --- | --- |
+| `notification_capacity(target)` | 验证当前目标／订阅，返回结合 bearer、特征及栈限制的本次通知容量 |
+| `try_queue_notification(target, value)` | 再次核对身份、订阅与容量，完整复制或接受数据，返回原始 SDK 错误 |
+
+`Target` 应区分连接代次、特征／数据库身份和适用 bearer；重连时不能只复用旧裸句柄。
+容量在查询与提交之间可能改变，后端必须在提交时复核。适配器的两个方法都必须有限完成。
+下面的函数接收设备已经实现好的后端，不假设任何厂商 SDK：
+
+```rust
+#[cfg(feature = "ble")]
+pub mod ble_example {
+    use moteframe_ble::{
+        CheckedNotifier, NotificationBackend, NotificationRef, NotifyError,
+        QueueAccepted, WriteBufferError, WriteMeta, WriteSlot,
+    };
+
+    // 仅控制接收 payload 数组，另有目标／长度等元数据。
+    pub const RX_BYTES: usize = 32;
+
+    pub fn notify<B: NotificationBackend>(
+        backend: &mut B,
+        target: B::Target,
+        value: &[u8],
+    ) -> Result<QueueAccepted, NotifyError<B::Error>> {
+        let mut tx = CheckedNotifier::new(NotificationRef::new(backend));
+        tx.try_notify(target, value)
+    }
+
+    pub fn new_receive_slot<T: Copy>() -> WriteSlot<T, RX_BYTES> {
+        WriteSlot::new()
+    }
+
+    // 从 SDK 的完整、已提交写事件回调调用；不接收待提交片段。
+    pub fn on_committed_write<T: Copy>(
+        slot: &mut WriteSlot<T, RX_BYTES>,
+        target: T,
+        value: &[u8],
+    ) -> Result<(), WriteBufferError> {
+        slot.push(target, value)
+    }
+
+    // 由业务循环消费；有事件时仅 output[..meta.length] 是本次有效数据。
+    pub fn take_received<T: Copy>(
+        slot: &mut WriteSlot<T, RX_BYTES>,
+        output: &mut [u8],
+    ) -> Result<Option<WriteMeta<T>>, WriteBufferError> {
+        slot.take_into(output)
+    }
+}
+```
+
+固件持有 `new_receive_slot::<Target>()` 返回的槽，在 SDK 完整写事件中调用
+`on_committed_write`，再在业务循环调用 `take_received`。跨中断／任务访问时，固件提供同步。
+`RX_BYTES` 可按业务改为 8、64 等；槽满、值超长、输出不足会报错，不会截断或覆盖旧事件。
+输出不足时槽和输出都保留，成功取出后清槽；它是单槽而不是多消息队列。
+
+通知返回 `QueueAccepted` 只表示后端已接受输入、切片可复用，不表示空口完成或对端确认。
+通知长度由当前目标容量决定，`RX_BYTES` 不控制通知容量或整个 BLE 栈的 RAM；包装器不自动
+分包或重试。需要拥有后端时可使用 `CheckedNotifier::new(backend)`，之后用 `into_inner()`
+取回原对象，无隐式发送或恢复。详见 [BLE 契约](crates/moteframe-ble/README.md)和
+[设计、兼容与资源证据](docs/portable-modules.md)。
+
 ## 本地开发
 
 需要已安装的 Rust 1.96.0（rustfmt、Clippy、`thumbv6m-none-eabi` target）、Python 3.9+、Make。
