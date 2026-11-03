@@ -1,4 +1,6 @@
 """Behavioral regressions for the portable-source publication boundary."""
+import ast
+from collections import Counter
 from pathlib import Path
 import importlib.util
 import tempfile
@@ -50,6 +52,17 @@ class BoundaryTests(unittest.TestCase):
         metadata["resolve"]["nodes"].append({"id": package["id"], "dependencies": []})
         return package
 
+    def test_boundary_test_methods_are_not_shadowed(self):
+        tree = ast.parse(Path(__file__).read_text())
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ClassDef):
+                names = [member.name for member in node.body
+                         if isinstance(member, (ast.FunctionDef, ast.AsyncFunctionDef))
+                         and member.name.startswith("test_")]
+                duplicates = sorted(name for name, count in Counter(names).items() if count > 1)
+                with self.subTest(test_class=node.name):
+                    self.assertEqual(duplicates, [])
+
     def test_should_scan_nested_artifact_directories(self):
         for directory in ["target", ".superpowers", ".git"]:
             with self.subTest(directory=directory):
@@ -84,7 +97,14 @@ class BoundaryTests(unittest.TestCase):
         self.write("examples/other/target/private.bin", "unreviewed")
         self.assertTrue(BOUNDARY.validate_files(self.root))
 
-    def test_should_reject_extra_workspace_members(self):
+    def test_foundation_build_exception_is_exact_and_never_allows_tracked_artifacts(self):
+        self.write("examples/device-foundation/target/private.bin", "local artifact")
+        self.assertEqual(BOUNDARY.validate_files(self.root), [])
+        self.assertTrue(BOUNDARY.validate_tracked(["examples/device-foundation/target/private.bin"]))
+        self.write("examples/device-foundation/other/private.bin", "unreviewed")
+        self.assertTrue(BOUNDARY.validate_files(self.root))
+
+    def test_should_reject_unknown_workspace_member_ids(self):
         metadata = self.metadata()
         metadata["workspace_members"].append("unreviewed")
         self.assertTrue(BOUNDARY.validate_metadata(metadata, self.root))
@@ -191,6 +211,7 @@ class BoundaryTests(unittest.TestCase):
                 metadata = self.metadata()
                 metadata["packages"][0]["dependencies"] = [dependency]
                 self.assertTrue(BOUNDARY.validate_metadata(metadata, self.root))
+
 
     def test_should_reject_extra_workspace_members(self):
         metadata = self.metadata()

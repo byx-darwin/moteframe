@@ -372,6 +372,7 @@ make ui-config       # 功能组合、编译拒绝及配置内存／链接探针
 make core-compat     # core 消费者、所有权拒绝与固定 ARM 体积对比
 make i2c-compat      # I²C 旧接口零增量门禁及严格读取／资源取回实测
 make portable        # 存储／BLE 固定消费者、布局和链接／局部帧证据
+make device-foundation # 输入／UI／素材／BLE 完整离线组合、恢复／公平性与组合内存
 make assets-input    # 素材／输入固定消费者、容量对照及不使用新库的链接检查
 make ui-low-memory   # 持续验证应用示例的真实 32／8 像素两档
 make packages        # 检查 Cargo 计划打包的文件，不发布
@@ -424,6 +425,7 @@ ARM 布局、对象代码、链接消费者和单函数栈帧均为离线证据�
 | [core 扩展与资源核算](docs/core-extensibility.md) | HAL 桥接、资源取回、兼容消费者及 Flash／RAM／局部栈帧实测 |
 | [I²C 扩展与资源成本](docs/i2c-extensibility.md) | 普通地址、严格 STOP 检查、资源取回和兼容性／固件成本 |
 | [存储／BLE 设计与验证](docs/portable-modules.md) | 扩展边界、兼容方式、资源成本及冻结基线迁移 |
+| [完整离线接入](docs/device-foundation.md) | 输入、UI、素材与蓝牙事件组合、错误恢复、公平性和内存统计 |
 | [初始抽取验证](docs/verification.md) | 0.1 抽取、开源准备及历史验证记录 |
 | [项目进度](docs/progress.md) | 分阶段开发与源码交付记录 |
 | [通用组件抽取边界](specs/foundation-extraction.md) | 仓库范围与适配责任 |

@@ -45,6 +45,14 @@ ROOT_FILES = {
     "specs/assets-input.md", "docs/plans/2026-11-03-assets-input.md", "docs/assets-input.md", "docs/public-contracts.md",
     "examples/ui-low-memory/Cargo.toml", "examples/ui-low-memory/Cargo.lock", "examples/ui-low-memory/README.md",
     "examples/ui-low-memory/src/lib.rs", "examples/ui-low-memory/tests/render.rs",
+    "specs/device-foundation.md", "docs/plans/2026-11-03-device-foundation.md", "docs/device-foundation.md",
+    "examples/device-foundation/Cargo.toml", "examples/device-foundation/Cargo.lock",
+    "examples/device-foundation/LICENSE", "examples/device-foundation/NOTICE", "examples/device-foundation/README.md",
+    "examples/device-foundation/src/lib.rs", "examples/device-foundation/src/model.rs",
+    "examples/device-foundation/src/services.rs", "examples/device-foundation/src/runtime.rs",
+    "examples/device-foundation/src/scene.rs", "examples/device-foundation/src/probe.rs",
+    "examples/device-foundation/examples/replay.rs", "examples/device-foundation/tests/services.rs",
+    "examples/device-foundation/tests/integration.rs", "examples/device-foundation/tests/replay.rs",
     "docs/ui-memory-profiles.md",
     "docs/ui-configuration-review-r02.md", "docs/ui-configuration-implementation.md", "docs/ui-configuration.md", "docs/plans/2026-11-02-ui-configuration.md",
 }
@@ -60,6 +68,7 @@ SCRIPTS = {
     "scripts/probes/i2c_compat.rs", "scripts/i2c-compatibility-baseline.json",
     "scripts/check_build_context.py", "scripts/build-context-migrations.json", "scripts/tests/test_build_context.py",
     "scripts/check_ui_low_memory.py", "scripts/check_portable_modules.py", "scripts/probes/portable_modules.rs", "scripts/tests/test_portable_modules.py",
+    "scripts/check_device_foundation.py", "scripts/probes/device_foundation.rs", "scripts/tests/test_device_foundation.py",
     "scripts/check_assets_input.py", "scripts/probes/assets_input.rs", "scripts/tests/test_assets_input.py",
 }
 BINARY_SUFFIXES = {".bin", ".lib", ".a", ".elf", ".hex", ".pdf", ".doc", ".docx", ".png", ".jpg", ".zip", ".7z", ".rar", ".pem", ".key"}
@@ -97,7 +106,7 @@ def validate_files(root):
                 directories.remove(name)
             elif name == "__pycache__" or (base == root and name in {".git", "target", ".superpowers"}):
                 directories.remove(name)
-            elif path.relative_to(root).as_posix() == "examples/ui-low-memory/target":
+            elif path.relative_to(root).as_posix() in {"examples/ui-low-memory/target", "examples/device-foundation/target"}:
                 directories.remove(name)
         for name in files:
             path = base / name

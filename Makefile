@@ -1,9 +1,9 @@
 PYTHON ?= python3
 TARGET ?= thumbv6m-none-eabi
 
-.PHONY: check fmt format lint test doc boundary python-tests build example memory ui-config core-compat i2c-compat portable assets-input ui-low-memory packages independent supply-chain secrets hooks-install hooks
+.PHONY: check fmt format lint test doc boundary python-tests build example memory ui-config core-compat i2c-compat portable assets-input device-foundation ui-low-memory packages independent supply-chain secrets hooks-install hooks
 
-check: fmt lint test doc boundary python-tests example memory ui-config ui-low-memory core-compat i2c-compat portable assets-input packages independent
+check: fmt lint test doc boundary python-tests example memory ui-config ui-low-memory core-compat i2c-compat portable assets-input device-foundation packages independent
 
 fmt:
 	cargo fmt --all -- --check
@@ -54,6 +54,9 @@ portable:
 
 assets-input:
 	$(PYTHON) scripts/check_assets_input.py
+
+device-foundation:
+	$(PYTHON) scripts/check_device_foundation.py
 
 packages:
 	$(PYTHON) scripts/check_packages.py
