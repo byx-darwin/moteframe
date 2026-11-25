@@ -155,7 +155,7 @@ old E81 then new-session realtime, full proof retention without physical START,
 unblocked physical STOP, real E81 admission freeing capacity and device work after detach.
 Business/static resource Capacity after the response preflight is wire LimitExceeded0007
 with exactly4B status. A short real output buffer remains local SessionError::Capacity
-before any action. Run `python3 crates/device-motion-service/verify.py` for the complete
+before any action. From the repository root, run `python3 devices/wattch5/crates/device-motion-service/verify.py` for the complete
 feature/Host/ARM/strict-lint matrix; `verification.json` records commands, exits and hashes.
 
 Wire C31 STOP also remains executable when N ordinary watches are full of older

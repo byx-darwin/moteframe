@@ -82,6 +82,6 @@ Thresholds are copied at context creation, so policy changes cannot rewrite an a
 
 ## Verification and remaining integration
 
-Run `cargo test --manifest-path crates/device-health/Cargo.toml --all-features --locked` and the corresponding `--no-default-features --features NAME` commands. See `verification.json` for the exact feature/Host/ARM command matrix and observed results.
+From the repository root, run `cargo test --manifest-path devices/wattch5/crates/device-health/Cargo.toml --all-features --locked` and the corresponding `--no-default-features --features NAME` commands. See `verification.json` for the exact feature/Host/ARM command matrix and observed results.
 
 Remaining: real backends/algorithms and clinical validity, BLE/runtime routing and authentication, product-declaration gate wiring before sensor-measurement claims, module capability registration, actual event routing/framing (ordinary events have no extra CRC), durable history/LATEST storage, product-global resource mapping, actual product mood labels/algorithm versions/temperature mode support, hardware verification. Commercial raw/self-test feature guards remain the firmware's responsibility. No hardware action or universal functionality-complete claim is made.

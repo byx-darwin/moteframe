@@ -170,5 +170,5 @@ Actual business port Capacity after the response preflight now returns exact
 LimitExceeded0007 `[7,0,0,0]`; it does not apply cancellation or create a success ticket.
 A short caller output buffer still returns local SessionError::Capacity before pure
 preflight or physical effects. The original independent review directory is unchanged.
-Run `python3 crates/device-wellness-service/verify.py` for the complete feature/Host/ARM/
+From the repository root, run `python3 devices/wattch5/crates/device-wellness-service/verify.py` for the complete feature/Host/ARM/
 strict-lint matrix; `verification.json` records commands, exits and source hashes.
