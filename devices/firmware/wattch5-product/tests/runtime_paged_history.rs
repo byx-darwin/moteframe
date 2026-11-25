@@ -1,7 +1,7 @@
 //! Optional paged history is a real selected recovery owner, without DATA activation.
 #![cfg(feature = "runtime")]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
-#[path = "../../../crates/device-history-store/tests/paged_service_support/mod.rs"]
+#[path = "../../../wattch5/crates/device-history-store/tests/paged_service_support/mod.rs"]
 mod paged_support;
 use device_history_service::{HistoryFailure, RecordStore};
 use device_runtime::PortError;

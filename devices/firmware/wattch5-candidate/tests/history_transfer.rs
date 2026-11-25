@@ -1,6 +1,6 @@
 //! Offline integration of the actual retained history source, async NOR and 20-byte admission.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
-#[path = "../../../crates/device-history-store/tests/async_paged_support/mod.rs"]
+#[path = "../../../wattch5/crates/device-history-store/tests/async_paged_support/mod.rs"]
 mod medium;
 
 use core::{cell::Cell, num::NonZeroU64, task::Poll};

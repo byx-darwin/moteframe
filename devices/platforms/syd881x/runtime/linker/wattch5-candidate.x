@@ -12,7 +12,8 @@ __stack_bottom = ORIGIN(STACK);
 __stack_top = ORIGIN(STACK) + LENGTH(STACK);
 SECTIONS {
  .vector_table ORIGIN(FLASH) : { KEEP(*(.vector_table)) } > FLASH
- .text : { *(.text*) *(.rodata*) *(.ARM.extab*) } > FLASH
+ /* Pack read-only data by alignment so input order adds less padding. */
+ .text : { *(.text*) *(SORT_BY_ALIGNMENT(.rodata*)) *(.ARM.extab*) } > FLASH
  .bringup_profile : ALIGN(4) { KEEP(*(.bringup_profile)) } > FLASH
  .board_configuration : ALIGN(4) { KEEP(*(.board_configuration)) } > FLASH
  .candidate_config : ALIGN(4) { KEEP(*(.candidate_config)) } > FLASH

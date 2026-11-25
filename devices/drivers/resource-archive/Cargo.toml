@@ -12,6 +12,6 @@ device-core.workspace = true
 workspace = true
 
 [dev-dependencies]
-device-storage = { path = "../../crates/device-storage", version = "0.1.0" }
-device-history-store = { path = "../../crates/device-history-store", version = "0.1.0" }
-device-history-service = { path = "../../crates/device-history-service", version = "0.1.0" }
+device-storage = { path = "../../wattch5/crates/device-storage", version = "0.1.0" }
+device-history-store = { path = "../../wattch5/crates/device-history-store", version = "0.1.0" }
+device-history-service = { path = "../../wattch5/crates/device-history-service", version = "0.1.0" }

@@ -2,6 +2,8 @@
 
 本目录包含 [FR8029D](firmware/fr8029d-bringup/README.md) 和 [Wattch 5](boards/wattch5/README.md) 的 Rust 源码、板级适配和测试。设备工程直接引用仓库根目录的 MoteFrame crates。两个固件保留各自的 Cargo 入口和目标架构，根目录的工作区仍用于 MoteFrame 库和可移植示例。
 
+两款设备共用的 `ble-controller` 和 `ble-host-trouble` 位于 [crates/](crates/)。Wattch 5 的产品、板级测试和候选固件所用的设备库位于 [wattch5/crates/](wattch5/crates/)，仍由本目录的 Cargo 工作区和原有独立清单管理。
+
 | 设备 | 入口 | 目标 |
 | --- | --- | --- |
 | FR8029D GATT 探针 | `firmware/fr8029d-bringup` | Cortex-M33，`thumbv8m.main-none-eabi` |

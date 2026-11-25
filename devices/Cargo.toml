@@ -1,6 +1,6 @@
 [workspace]
 members = [
-    "crates/device-moteframe",
+    "wattch5/crates/device-moteframe",
     "platforms/syd881x/hal",
     "platforms/syd881x/runtime",
     "drivers/bitbang-i2c",
@@ -8,50 +8,50 @@ members = [
     "drivers/touch",
     "drivers/resource-archive",
 
-    "crates/device-application",
-    "crates/device-stream",
-    "crates/device-services",
-    "crates/device-connection",
-    "crates/device-motion",
-    "crates/device-actions",
-    "crates/device-models",
-    "crates/device-storage",
-    "crates/device-config-store",
-    "crates/device-object-store",
-    "crates/device-history-store",
-    "crates/device-property-store",
-    "crates/device-time-store",
-    "crates/device-job-store",
-    "crates/device-runtime",
-    "crates/device-protocol",
-    "crates/device-core",
-    "crates/device-assets",
+    "wattch5/crates/device-application",
+    "wattch5/crates/device-stream",
+    "wattch5/crates/device-services",
+    "wattch5/crates/device-connection",
+    "wattch5/crates/device-motion",
+    "wattch5/crates/device-actions",
+    "wattch5/crates/device-models",
+    "wattch5/crates/device-storage",
+    "wattch5/crates/device-config-store",
+    "wattch5/crates/device-object-store",
+    "wattch5/crates/device-history-store",
+    "wattch5/crates/device-property-store",
+    "wattch5/crates/device-time-store",
+    "wattch5/crates/device-job-store",
+    "wattch5/crates/device-runtime",
+    "wattch5/crates/device-protocol",
+    "wattch5/crates/device-core",
+    "wattch5/crates/device-assets",
     "drivers/display",
-    "crates/device-ble",
+    "wattch5/crates/device-ble",
     "platforms/syd881x/vendor-ble",
     "boards/wattch5",
     "platforms/syd881x/radio",
     "crates/ble-controller",
     "crates/ble-host-trouble",
     "platforms/syd881x/controller",
-    "crates/device-ui",
+    "wattch5/crates/device-ui",
     "examples/wattch5-ui",
     "examples/wattch5-retro-ui",
     "examples/wattch5-parity-ui",
 ]
 exclude = [
-    "crates/device-health",
-    "crates/device-maintenance",
-    "crates/device-content",
-    "crates/device-wellness",
-    "crates/device-object-service",
-    "crates/device-history-service",
-    "crates/device-configuration",
-    "crates/device-health-service",
-    "crates/device-motion-service",
-    "crates/device-content-service",
-    "crates/device-maintenance-service",
-    "crates/device-wellness-service",
+    "wattch5/crates/device-health",
+    "wattch5/crates/device-maintenance",
+    "wattch5/crates/device-content",
+    "wattch5/crates/device-wellness",
+    "wattch5/crates/device-object-service",
+    "wattch5/crates/device-history-service",
+    "wattch5/crates/device-configuration",
+    "wattch5/crates/device-health-service",
+    "wattch5/crates/device-motion-service",
+    "wattch5/crates/device-content-service",
+    "wattch5/crates/device-maintenance-service",
+    "wattch5/crates/device-wellness-service",
 ]
 resolver = "3"
 
@@ -62,8 +62,8 @@ rust-version = "1.96.0"
 publish = false
 
 [workspace.dependencies]
-device-storage = { path = "crates/device-storage", version = "0.1.0" }
-device-services = { path = "crates/device-services", version = "0.1.0" }
+device-storage = { path = "wattch5/crates/device-storage", version = "0.1.0" }
+device-services = { path = "wattch5/crates/device-services", version = "0.1.0" }
 syd881x-hal = { path = "platforms/syd881x/hal", version = "0.1.0" }
 syd881x-runtime = { path = "platforms/syd881x/runtime", version = "0.1.0" }
 device-bitbang-i2c = { path = "drivers/bitbang-i2c", version = "0.1.0" }
@@ -71,14 +71,14 @@ device-spi-nor = { path = "drivers/spi-nor", version = "0.1.0" }
 device-touch = { path = "drivers/touch", version = "0.1.0" }
 device-resource-archive = { path = "drivers/resource-archive", version = "0.1.0" }
 
-device-assets = { path = "crates/device-assets", version = "0.1.0" }
+device-assets = { path = "wattch5/crates/device-assets", version = "0.1.0" }
 embedded-hal = { version = "=1.0.0", default-features = false }
-device-core = { path = "crates/device-core", version = "0.1.0" }
-device-ble = { path = "crates/device-ble", version = "0.1.0" }
+device-core = { path = "wattch5/crates/device-core", version = "0.1.0" }
+device-ble = { path = "wattch5/crates/device-ble", version = "0.1.0" }
 syd881x-radio = { path = "platforms/syd881x/radio", version = "0.1.0" }
 
 device-display = { path = "drivers/display", version = "0.1.0" }
-device-ui = { path = "crates/device-ui", version = "0.1.0" }
+device-ui = { path = "wattch5/crates/device-ui", version = "0.1.0" }
 embedded-graphics = { version = "=0.8.2", default-features = false }
 bt-hci = { version = "=0.10.0", default-features = false }
 embedded-io = { version = "=0.7.1", default-features = false }

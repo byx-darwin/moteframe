@@ -112,6 +112,24 @@ class BoundaryTests(unittest.TestCase):
     def test_should_accept_only_reviewed_tracked_paths(self):
         self.assertEqual(BOUNDARY.validate_tracked(["README.md", "crates/moteframe-core/src/lib.rs"]), [])
 
+    def test_should_allow_only_reviewed_crates_in_each_device_crate_directory(self):
+        approved = [
+            "devices/crates/ble-controller/src/lib.rs",
+            "devices/crates/ble-host-trouble/Cargo.toml",
+            "devices/wattch5/crates/device-core/src/lib.rs",
+            "devices/wattch5/crates/device-stream/tests/raw.rs",
+        ]
+        for path in approved:
+            self.write(path, "")
+        self.assertEqual(BOUNDARY.validate_files(self.root), [])
+        self.assertEqual(BOUNDARY.validate_tracked(approved), [])
+        rejected = [
+            "devices/crates/device-core/src/lib.rs",
+            "devices/wattch5/crates/ble-controller/src/lib.rs",
+            "devices/wattch5/crates/device-unrelated/src/lib.rs",
+        ]
+        self.assertEqual(len(BOUNDARY.validate_tracked(rejected)), len(rejected))
+
     def test_should_allow_device_source_and_reject_device_firmware_dumps(self):
         source = "devices/firmware/fr8029d-bringup/src/main.rs"
         self.write(source, 'global_asm!("wfi");\n')
@@ -136,7 +154,7 @@ class BoundaryTests(unittest.TestCase):
         self.write(artifact, "local image")
         self.assertEqual(BOUNDARY.validate_files(self.root), [])
         self.assertTrue(BOUNDARY.validate_tracked([artifact]))
-        unreviewed = "devices/crates/device-core/target/image.bin"
+        unreviewed = "devices/wattch5/crates/device-core/target/image.bin"
         self.write(unreviewed, "unreviewed image")
         self.assertIn("binary/resource: " + unreviewed, BOUNDARY.validate_files(self.root))
 

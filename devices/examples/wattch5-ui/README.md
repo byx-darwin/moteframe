@@ -1,6 +1,6 @@
 # wattch 5 reference UI
 
-产品示例，复刻原版外观和交互；通用屏幕、绘图、刷新接口仍在 `crates/device-ui`。
+产品示例，复刻原版外观和交互。通用屏幕、绘图、刷新接口位于 [device-ui](../../wattch5/crates/device-ui/)。
 本批包含 style2 数字表盘、功能菜单、设置列表及亮度页。时间由调用方注入，
 亮度只保存到示例内存，其他目的地仅发出 `Action::Open`，不执行产品功能。
 

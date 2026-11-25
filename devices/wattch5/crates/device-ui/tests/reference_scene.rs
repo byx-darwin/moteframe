@@ -14,7 +14,7 @@ static NEXT: AtomicU64 = AtomicU64::new(0);
 
 fn fixture(manifest: &str, pixels: &[u8]) -> std::io::Result<PathBuf> {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../target/ui-migration/fixtures")
+        .join("../../../target/ui-migration/fixtures")
         .join(format!(
             "{}-{}",
             std::process::id(),

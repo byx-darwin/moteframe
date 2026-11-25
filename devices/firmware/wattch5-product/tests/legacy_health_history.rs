@@ -1,6 +1,6 @@
 #![cfg(feature = "legacy-health")]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
-#[path = "../../../crates/device-history-store/tests/async_paged_support/mod.rs"]
+#[path = "../../../wattch5/crates/device-history-store/tests/async_paged_support/mod.rs"]
 mod medium;
 use core::task::Poll;
 use device_health::{JobManager, Latest};

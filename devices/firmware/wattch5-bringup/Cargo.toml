@@ -12,12 +12,12 @@ development = []
 arm-image = []
 [dependencies]
 moteframe-input = { path = "../../../crates/moteframe-input", version = "=0.2.0", default-features = false }
-device-protocol = { path = "../../crates/device-protocol", version = "=0.1.0" }
-device-services = { path = "../../crates/device-services", version = "=0.1.0" }
-device-runtime = { path = "../../crates/device-runtime", version = "=0.1.0" }
-device-core = { path = "../../crates/device-core", version = "=0.1.0" }
+device-protocol = { path = "../../wattch5/crates/device-protocol", version = "=0.1.0" }
+device-services = { path = "../../wattch5/crates/device-services", version = "=0.1.0" }
+device-runtime = { path = "../../wattch5/crates/device-runtime", version = "=0.1.0" }
+device-core = { path = "../../wattch5/crates/device-core", version = "=0.1.0" }
 device-display = { path = "../../drivers/display", version = "=0.1.0" }
-device-ui = { path = "../../crates/device-ui", version = "=0.1.0" }
+device-ui = { path = "../../wattch5/crates/device-ui", version = "=0.1.0" }
 device-touch = { path = "../../drivers/touch", version = "=0.1.0" }
 ble-controller = { path = "../../crates/ble-controller", version = "=0.1.0" }
 ble-host-trouble = { path = "../../crates/ble-host-trouble", version = "=0.1.0" }
@@ -32,7 +32,7 @@ syd881x-radio = { path = "../../platforms/syd881x/radio", version = "=0.1.0" }
 static_cell = { version = "=2.1.1", default-features = false }
 embassy-time-driver = { version = "=0.2.2", default-features = false, features = ["tick-hz-1_000_000"] }
 [dev-dependencies]
-device-connection = { path = "../../crates/device-connection", version = "=0.1.0" }
+device-connection = { path = "../../wattch5/crates/device-connection", version = "=0.1.0" }
 critical-section = { version = "=1.2.0", features = ["std"] }
 embassy-time = { version = "=0.5.1", features = ["std", "generic-queue-8"] }
 [[bin]]

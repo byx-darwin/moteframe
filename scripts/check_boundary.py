@@ -73,8 +73,9 @@ SCRIPTS = {
 }
 BINARY_SUFFIXES = {".bin", ".lib", ".a", ".elf", ".hex", ".pdf", ".doc", ".docx", ".png", ".jpg", ".zip", ".7z", ".rar", ".pem", ".key"}
 DEVICE_FIRMWARE = {"fr8029d-bringup", "wattch5-bringup", "wattch5-candidate", "wattch5-product"}
-DEVICE_CRATES = {
-    "ble-controller", "ble-host-trouble", "device-actions", "device-application",
+SHARED_DEVICE_CRATES = {"ble-controller", "ble-host-trouble"}
+WATTCH5_CRATES = {
+    "device-actions", "device-application",
     "device-assets", "device-ble", "device-config-store", "device-configuration",
     "device-connection", "device-content", "device-content-service", "device-core",
     "device-health", "device-health-service", "device-history-service",
@@ -131,7 +132,11 @@ def allowed_device_source(relative):
         return False
     section, package = parts[1:3]
     allowed_package = (
-        (section == "crates" and package in DEVICE_CRATES)
+        (section == "crates" and package in SHARED_DEVICE_CRATES)
+        or (
+            section == "wattch5" and package == "crates"
+            and len(parts) >= 5 and parts[3] in WATTCH5_CRATES
+        )
         or (section == "firmware" and package in DEVICE_FIRMWARE)
         or (section == "boards" and package == "wattch5")
         or (section == "platforms" and package == "syd881x")
