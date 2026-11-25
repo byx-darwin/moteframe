@@ -1,5 +1,5 @@
 //! System actions are not scheduled until the successful response was transport-admitted.
-use crate::{Action, ActionError};
+use super::{Action, ActionError};
 /// Trusted current system-control scope; never supplied by an unauthenticated request.
 pub trait SystemScope {
     /// Whether the current principal may schedule system actions.
@@ -54,11 +54,11 @@ impl DeferredSystem {
             Action::Poweroff { delay_s } => (false, delay_s),
             Action::RestoreName => return Err(ActionError::Unsupported),
             #[cfg(any(
-                feature = "find",
-                feature = "phone",
-                feature = "call",
-                feature = "media",
-                feature = "notification-actions"
+                feature = "action-find",
+                feature = "action-phone",
+                feature = "action-call",
+                feature = "action-media",
+                feature = "action-notification"
             ))]
             _ => return Err(ActionError::Unsupported),
         };

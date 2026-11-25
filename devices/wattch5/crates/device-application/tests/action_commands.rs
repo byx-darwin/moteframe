@@ -1,13 +1,13 @@
 //! Exact action body tests. They do not execute hardware actions.
 #![cfg(all(
     feature = "system",
-    feature = "find",
-    feature = "media",
-    feature = "phone",
-    feature = "call",
-    feature = "notification-actions"
+    feature = "action-find",
+    feature = "action-media",
+    feature = "action-phone",
+    feature = "action-call",
+    feature = "action-notification"
 ))]
-use device_actions::{Action, ActionError, DeferredSystem, SystemBackend, SystemScope};
+use device_application::actions::{Action, ActionError, DeferredSystem, SystemBackend, SystemScope};
 #[test]
 fn test_should_decode_known_actions_and_reject_unknown_enums_or_trailing_bytes() {
     for (module, opcode, b) in [

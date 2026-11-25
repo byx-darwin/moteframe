@@ -117,6 +117,7 @@ class BoundaryTests(unittest.TestCase):
             "devices/crates/ble-controller/src/lib.rs",
             "devices/crates/ble-host-trouble/Cargo.toml",
             "devices/wattch5/crates/device-core/src/lib.rs",
+            "devices/wattch5/crates/device-application/src/actions/mod.rs",
             "devices/wattch5/crates/device-maintenance-service/tests/raw_lane.rs",
         ]
         for path in approved:
@@ -126,6 +127,8 @@ class BoundaryTests(unittest.TestCase):
         rejected = [
             "devices/crates/device-core/src/lib.rs",
             "devices/wattch5/crates/ble-controller/src/lib.rs",
+            "devices/wattch5/crates/device-actions/src/lib.rs",
+            "devices/wattch5/crates/device-stream/src/lib.rs",
             "devices/wattch5/crates/device-unrelated/src/lib.rs",
         ]
         self.assertEqual(len(BOUNDARY.validate_tracked(rejected)), len(rejected))

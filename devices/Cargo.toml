@@ -12,7 +12,6 @@ members = [
     "wattch5/crates/device-services",
     "wattch5/crates/device-connection",
     "wattch5/crates/device-motion",
-    "wattch5/crates/device-actions",
     "wattch5/crates/device-models",
     "wattch5/crates/device-storage",
     "wattch5/crates/device-config-store",

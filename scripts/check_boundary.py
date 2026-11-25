@@ -75,7 +75,7 @@ BINARY_SUFFIXES = {".bin", ".lib", ".a", ".elf", ".hex", ".pdf", ".doc", ".docx"
 DEVICE_FIRMWARE = {"fr8029d-bringup", "wattch5-bringup", "wattch5-candidate", "wattch5-product"}
 SHARED_DEVICE_CRATES = {"ble-controller", "ble-host-trouble"}
 WATTCH5_CRATES = {
-    "device-actions", "device-application",
+    "device-application",
     "device-assets", "device-ble", "device-config-store", "device-configuration",
     "device-connection", "device-content", "device-content-service", "device-core",
     "device-health", "device-health-service", "device-history-service",

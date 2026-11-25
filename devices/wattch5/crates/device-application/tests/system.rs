@@ -2,10 +2,20 @@
 #![cfg(feature = "system")]
 #![allow(clippy::unwrap_used)]
 use core::cell::Cell;
-use device_actions::{Action, ActionError, SystemBackend, SystemScope};
+use device_application::actions::{Action, ActionError, SystemBackend, SystemScope};
 use device_application::{SystemAccess, SystemFailure, SystemHandler, SystemPort};
 use device_protocol::{Frame, Header, Kind, ModuleEntry};
 use device_services::{ServiceHandler, SessionError};
+
+#[cfg(all(feature = "find", not(feature = "action-find")))]
+#[test]
+fn test_should_keep_find_content_independent_of_the_action_codec() {
+    assert_eq!(
+        Action::decode(6, 0x30, &[0, 3, 30, 0]),
+        Err(ActionError::Unsupported)
+    );
+}
+
 #[derive(Debug)]
 struct Access(Cell<bool>);
 impl SystemAccess for Access {

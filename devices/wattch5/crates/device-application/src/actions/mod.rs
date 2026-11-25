@@ -1,5 +1,6 @@
 //! Compile-time optional action bodies and response-admission safety. No device I/O.
-#![no_std]
+//!
+//! Action codec features are independent of the application content services.
 /// Explicit portable action failure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActionError {
@@ -20,20 +21,20 @@ pub enum ActionError {
 }
 #[cfg(any(
     feature = "system",
-    feature = "find",
-    feature = "phone",
-    feature = "call",
-    feature = "media",
-    feature = "notification-actions"
+    feature = "action-find",
+    feature = "action-phone",
+    feature = "action-call",
+    feature = "action-media",
+    feature = "action-notification"
 ))]
 mod commands;
 #[cfg(any(
     feature = "system",
-    feature = "find",
-    feature = "phone",
-    feature = "call",
-    feature = "media",
-    feature = "notification-actions"
+    feature = "action-find",
+    feature = "action-phone",
+    feature = "action-call",
+    feature = "action-media",
+    feature = "action-notification"
 ))]
 pub use commands::Action;
 #[cfg(feature = "system")]

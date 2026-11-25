@@ -1,6 +1,8 @@
 //! Portable application adapters. Real persistence, authorization and physical backends remain explicit ports.
 #![no_std]
 #![forbid(unsafe_code)]
+
+pub mod actions;
 #[cfg(feature = "configuration")]
 mod schema;
 #[cfg(feature = "configuration")]

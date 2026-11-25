@@ -11,6 +11,8 @@
 - `SystemHandler`：02.C30/C31仅在完整成功回复实际入发送队列后调真实延迟执行端口；排队重试不重复执行。02.C32使用可信默认名称并在原子持久提交后成功，E90必须来自该真实版本。未准入动作在断开时丢弃，已接受的计时动作执行时仍需复核权限。
 - `ControlEvent`：冻结00.E80、通用E90/E91精确正文；没有CRC或RESP公共前缀。
 
+`device_application::actions` 提供命令正文的编解码。`system` 启用重启、关机和恢复名称。查找、手机心跳、通话、媒体和通知动作分别由 `action-find`、`action-phone`、`action-call`、`action-media` 和 `action-notification` 启用。这些开关独立于 `find`、`phone`、`media` 等内容服务开关。
+
 `COMPILED_MODULES`只列被选源码合同和稳定编号，不是运行时可用性目录。新的业务模块初次实现版本1.0；00/10/70为1.2，71为1.1；值/记录schema版本另外解释。真实注册必须来自实际绑定后端与容量，不能仅因存在codec就advertise可用。
 
 产品组合参考`config/products/wattch5-build.json`。心率、血压、血氧、血糖、温度和Wellbeing策略已拆为独立configuration leaf feature；`health-policy`仅为开发时全组选项，wattch5使用实际选定的heart-rate/temperature。商用固件顶层负责禁止70–73及其别名，不使用全feature打商用包。

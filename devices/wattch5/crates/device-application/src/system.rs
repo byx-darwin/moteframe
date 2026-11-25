@@ -1,5 +1,5 @@
 //! System commands accept a delay before scheduling; no action is replayed after reconnect.
-use device_actions::{Action, ActionError, DeferredSystem, SystemBackend, SystemScope};
+use crate::actions::{Action, ActionError, DeferredSystem, SystemBackend, SystemScope};
 use device_protocol::{Frame, Header, Kind, ModuleEntry};
 use device_services::{Reason, ServiceHandler, SessionError, Status};
 /// Trusted device-control scope. Requests and build profiles never grant it.

@@ -11,7 +11,6 @@ device-motion = { version = "=0.1.0", path = "../device-motion", default-feature
 device-wellness = { version = "=0.1.0", path = "../device-wellness", default-features = false, optional = true }
 device-maintenance = { version = "=0.1.0", path = "../device-maintenance", default-features = false, optional = true }
 device-health = { version = "=0.1.0", path = "../device-health", default-features = false, optional = true }
-device-actions = { version = "=0.1.0", path = "../device-actions", default-features = false, optional = true }
 device-history-service = { version = "=0.1.0", path = "../device-history-service", default-features = false, optional = true }
 device-content = { version = "=0.1.0", path = "../device-content", default-features = false, optional = true }
 device-protocol = { version = "=0.1.0", path = "../device-protocol", default-features = false }
@@ -38,7 +37,13 @@ default = []
 service-routing = ["dep:device-health-service", "dep:device-motion-service", "dep:device-content-service", "device-content-service/event-pump", "dep:device-wellness-service", "dep:device-maintenance-service"]
 objects = ["dep:device-object-service"]
 device-jobs = ["dep:device-maintenance-service", "device-maintenance-service/device-jobs"]
-system = ["dep:device-actions", "device-actions/system"]
+system = []
+# Action codecs have separate gates from the corresponding content services.
+action-find = []
+action-phone = []
+action-call = []
+action-media = []
+action-notification = []
 history = ["dep:device-history-service"]
 raw-data = ["device-services/raw-data", "device-protocol/raw-data", "device-maintenance-service?/raw-data"]
 configuration = ["dep:device-configuration"]
