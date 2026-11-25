@@ -1,7 +1,10 @@
 //! Shared deadline and wake state for the two FR8029D executors.
 
 use crate::{advertising::CLOCK_MASK, connection::PacketTime};
-use core::sync::atomic::{AtomicBool, Ordering};
+use core::{
+    num::NonZeroU32,
+    sync::atomic::{AtomicBool, Ordering},
+};
 
 /// Work timed against the 28-bit baseband clock.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -25,6 +28,47 @@ pub enum RadioDeadline {
         /// Maximum slot duration in coarse ticks.
         timeout: u32,
     },
+}
+
+/// Completion watchdog for one submitted baseband slot.
+#[derive(Clone, Copy, Debug)]
+pub struct SlotWatchdog {
+    start: u32,
+    timeout: NonZeroU32,
+}
+
+impl SlotWatchdog {
+    /// Uses the submitted slot's duration word and allows two coarse ticks
+    /// for the fine start offset and completion status to become visible.
+    #[must_use]
+    pub fn new(start: u32, duration: u16) -> Self {
+        // Short-form durations are at most 32,767 us, below the 50 ms floor.
+        let timeout = if duration & 0x8000 == 0 {
+            160
+        } else {
+            (u32::from(duration & 0x7fff) + 2).max(160)
+        };
+        Self {
+            start,
+            timeout: NonZeroU32::new(timeout).unwrap_or(NonZeroU32::MIN),
+        }
+    }
+
+    /// Deadline shared by the timer wake and polling watchdog.
+    #[must_use]
+    pub const fn deadline(self) -> RadioDeadline {
+        RadioDeadline::Completion {
+            start: self.start,
+            timeout: self.timeout.get(),
+        }
+    }
+
+    /// True after the completion deadline, including across coarse clock wrap.
+    #[must_use]
+    pub fn expired(self, now: u32) -> bool {
+        let elapsed = now.wrapping_sub(self.start) & CLOCK_MASK;
+        (self.timeout.get()..CLOCK_MASK.div_ceil(2)).contains(&elapsed)
+    }
 }
 
 impl RadioDeadline {

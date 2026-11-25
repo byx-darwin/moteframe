@@ -214,7 +214,8 @@ fn configure_modem(trim: &RadioTrim) {
     update(APB0_CLOCK, 1 << 10, 0);
 }
 
-fn configure_baseband() -> Result<(), u32> {
+#[inline(never)]
+pub(super) fn configure_baseband() -> Result<(), u32> {
     const BASEBAND_RESET: u32 = 1 << 31;
     write32(BASEBAND, BASEBAND_RESET);
     if !wait_register(BASEBAND, BASEBAND_RESET, 0) {

@@ -4,7 +4,8 @@ use crate::gatt::{
     ATTRIBUTE_COUNT, CommittedWrites, GattError, GattProfile, GattProgress, VALUE_LEN,
 };
 use ble_controller::{
-    AdvertisingData, Controller, HciController, HciError, LinkBackend, RandomAddress, Version,
+    AdvertisingData, Controller, ControllerError, HciController, HciError, LinkBackend,
+    RandomAddress, Version,
 };
 pub use ble_host_trouble::Resources;
 use ble_host_trouble::{
@@ -19,8 +20,8 @@ use core::{
     convert::Infallible,
     fmt,
     future::{Future, poll_fn},
-    pin::pin,
-    task::Poll,
+    pin::{Pin, pin},
+    task::{Context, Poll},
 };
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use moteframe_ble::WriteBufferError;
@@ -115,7 +116,7 @@ pub fn run<B: LinkBackend, F: FnMut(GattReport)>(
     report: F,
 ) -> impl Future<Output = GattRunError<B::Error>> {
     let hci = HciController::new(Controller::new(backend, identity.version));
-    run_hci(hci, resources, identity, report, || Ok(()))
+    run_hci::<false, _, _, _>(hci, resources, identity, report, || Ok(()))
 }
 
 /// Runs the same GATT application with owner-driven radio service.
@@ -128,13 +129,13 @@ pub async fn run_event_driven<B: LinkBackend, F: FnMut(GattReport)>(
     report: F,
 ) -> GattRunError<B::Error> {
     let hci = HciController::new_with_external_wake(Controller::new(backend, identity.version));
-    run_hci(hci.borrowed(), resources, identity, report, || {
+    run_hci::<true, _, _, _>(hci.borrowed(), resources, identity, report, || {
         hci.service()
     })
     .await
 }
 
-async fn run_hci<C, E, F>(
+async fn run_hci<const EXTERNAL: bool, C, E, F>(
     hci: C,
     resources: &mut Resources,
     identity: GattIdentity,
@@ -152,28 +153,60 @@ where
     let stack = build(hci, resources, identity.address);
     let (mut rx, mut control, mut tx) = stack.runner().split();
     let mut rx = pin!(rx.run());
-    let mut tx = pin!(tx.run());
+    let mut transmit = pin!(async {
+        loop {
+            let result = tx.run().await;
+            // For an initialized Host's data ACL, State from send_acl
+            // denotes a backpressured write from an ended connection.
+            if !EXTERNAL
+                || !matches!(
+                    result,
+                    Err(BleHostError::Controller(HciError::Controller(
+                        ControllerError::State
+                    )))
+                )
+            {
+                return result;
+            }
+        }
+    });
     let mut control = pin!(control.run());
     let mut app = pin!(serve(&stack, identity, report));
     poll_fn(|cx| {
         if let Err(error) = service() {
             return Poll::Ready(GattRunError::Host(BleHostError::Controller(error)));
         }
-        if let Poll::Ready(result) =
-            poll_host_runners(tx.as_mut(), rx.as_mut(), control.as_mut(), cx)
-        {
+        let result = if EXTERNAL {
+            // The Controller has already advanced. Deliver its observations
+            // before the Host resumes any outgoing data.
+            poll_host_runners(rx.as_mut(), transmit.as_mut(), control.as_mut(), cx)
+        } else {
+            poll_host_runners(transmit.as_mut(), rx.as_mut(), control.as_mut(), cx)
+        };
+        if let Poll::Ready(result) = result {
             return Poll::Ready(
                 result
                     .err()
                     .map_or(GattRunError::HostStopped, GattRunError::Host),
             );
         }
-        app.as_mut().poll(cx).map(|result| match result {
+        let application = if EXTERNAL {
+            poll_application(app.as_mut(), cx)
+        } else {
+            app.as_mut().poll(cx)
+        };
+        application.map(|result| match result {
             Ok(never) => match never {},
             Err(error) => error,
         })
     })
     .await
+}
+
+// Keep the application poll frame separate from the controller and Host lanes.
+#[inline(never)]
+fn poll_application<F: Future>(app: Pin<&mut F>, cx: &mut Context<'_>) -> Poll<F::Output> {
+    app.poll(cx)
 }
 
 async fn serve<C, E, F>(

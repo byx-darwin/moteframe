@@ -39,7 +39,7 @@ pub(super) fn prepare_link(request: ConnectionRequest, event: ConnectionEvent) {
     write_record(control, &request.control_words(LINK_ID, TX_OFFSET, event));
 }
 
-pub(super) fn submit_link(slot: u32, event: ConnectionEvent, counter: u16) {
+pub(super) fn submit_link(slot: u32, event: ConnectionEvent, counter: u16) -> u16 {
     let control = PACKET_RAM + usize::from(CONNECTION_CONTROL);
     // SAFETY: There is no in-flight event when these window and counter
     // fields are overwritten. The hardware owns the remaining link state.
@@ -47,7 +47,9 @@ pub(super) fn submit_link(slot: u32, event: ConnectionEvent, counter: u16) {
         write_volatile((control + 0x1e) as *mut u16, event.receive_window);
         write_volatile((control + 0x60) as *mut u16, counter);
     }
-    submit(slot, &event.slot_words(CONNECTION_CONTROL));
+    let words = event.slot_words(CONNECTION_CONTROL);
+    submit(slot, &words);
+    words[5]
 }
 
 pub(super) fn submit(slot: u32, words: &[u16; 8]) {

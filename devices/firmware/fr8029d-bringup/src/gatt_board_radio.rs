@@ -23,6 +23,7 @@ use fr8029d_bringup::{
         advertising_slot, connectable_control,
     },
     connection::{ConnectionEvent, ConnectionRequest, ConnectionUpdate, PacketTime},
+    wake::SlotWatchdog,
 };
 #[cfg(feature = "ble-gatt-event-driven")]
 use {super::gatt_board_wake, fr8029d_bringup::wake::RadioDeadline};
@@ -30,7 +31,6 @@ use {super::gatt_board_wake, fr8029d_bringup::wake::RadioDeadline};
 const HALF_CLOCK: u32 = CLOCK_MASK.div_ceil(2);
 const CONTROL: usize = PACKET_RAM + CONNECTION_CONTROL as usize;
 const TX_HEAD_REGISTER: usize = CONTROL + 0x24;
-const MAX_SLOT_TICKS: u32 = 160;
 const LEGACY_ADV_LEN: usize = 14;
 // The mobile scanner must discover the new GATT table and its added CCCD.
 const ADDRESS_SUFFIX: u8 = if cfg!(feature = "ble-gatt-freertos") {
@@ -51,6 +51,7 @@ const ATT_RX: usize = 53;
 const ATT_TX: usize = 54;
 const LAST_ATT_RX: usize = 55;
 const LAST_ATT_TX: usize = 56;
+const RADIO_TIMEOUTS: usize = 61;
 
 #[derive(Debug)]
 struct Link {
@@ -94,6 +95,7 @@ impl Link {
         })
     }
 
+    #[inline(never)]
     fn advance(&mut self, anchor: Option<PacketTime>) {
         self.counter = self.counter.wrapping_add(1);
         if let Some(anchor) = anchor {
@@ -154,6 +156,7 @@ impl Link {
         }
     }
 
+    #[inline(never)]
     fn apply_map_at_instant(&mut self) {
         if let Some((instant, map)) = self.map_update
             && instant == self.counter
@@ -180,7 +183,7 @@ pub(super) struct Radio {
     receiver: Option<Receiver>,
     advertisement: Option<Advertisement>,
     link: Option<Link>,
-    pending_start: Option<u32>,
+    pending: Option<SlotWatchdog>,
     next_advertisement: u32,
     slot: u32,
     jitter: u32,
@@ -194,7 +197,7 @@ impl Radio {
             receiver: None,
             advertisement: None,
             link: None,
-            pending_start: None,
+            pending: None,
             next_advertisement: 0,
             slot: 0,
             jitter: 1,
@@ -204,11 +207,8 @@ impl Radio {
 
     #[cfg(feature = "ble-gatt-event-driven")]
     fn publish_deadline(&self) {
-        let deadline = if let Some(start) = self.pending_start {
-            Some(RadioDeadline::Completion {
-                start,
-                timeout: MAX_SLOT_TICKS,
-            })
+        let deadline = if let Some(slot) = self.pending {
+            Some(slot.deadline())
         } else if let Some(link) = &self.link {
             Some(RadioDeadline::Connection {
                 start: link.event.start.coarse,
@@ -295,29 +295,57 @@ impl Radio {
             }
         }
         link.advance(anchor);
-        if link.expired(now) {
-            let established = link.anchor.is_some();
-            self.link = None;
-            if established {
-                self.advertisement = None;
-                self.events
-                    .push(LinkEvent::Disconnected(0x08))
-                    .map_err(|_| 22_u32)?;
-            } else if let Some(advertisement) = self.advertisement {
-                self.start_advertising(now, &advertisement);
-            }
+        self.expire_link(now)
+    }
+
+    fn expire_link(&mut self, now: u32) -> Result<(), u32> {
+        if self.link.as_ref().is_some_and(|link| link.expired(now)) {
+            self.end_link(now)?;
         }
         Ok(())
     }
 
+    #[cold]
+    #[inline(never)]
+    fn end_link(&mut self, now: u32) -> Result<(), u32> {
+        let established = self.link.as_ref().is_some_and(|link| link.anchor.is_some());
+        self.link = None;
+        if established {
+            self.advertisement = None;
+            self.events
+                .push(LinkEvent::Disconnected(0x08))
+                .map_err(|_| 22_u32)?;
+        } else if let Some(advertisement) = self.advertisement {
+            self.start_advertising(now, &advertisement);
+        }
+        Ok(())
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn restart_baseband(&mut self) -> Result<u32, u32> {
+        increment(RADIO_TIMEOUTS);
+        // A timed-out slot may still own exchange RAM. Reset the scheduler
+        // before discarding its descriptors and building another event.
+        super::cold_radio::configure_baseband()?;
+        let now = clock().ok_or(3_u32)?;
+        super::gatt_board_time::rebase_clock(now);
+        self.pending = None;
+        self.slot = 0;
+        Ok(now)
+    }
+
+    #[cfg_attr(feature = "ble-gatt-event-driven", inline(never))]
     fn schedule(&mut self, now: u32) -> Result<(), u32> {
         if let Some(link) = self.link.as_mut() {
             link.prepare_timing_update()?;
             let start = link.event.start.coarse;
             let ahead = start.wrapping_sub(now) & CLOCK_MASK;
-            if ahead >= HALF_CLOCK {
+            if !(1..HALF_CLOCK).contains(&ahead) {
                 diagnostic(31, start);
-                return Err(23);
+                link.apply_map_at_instant();
+                link.advance(None);
+                return self.expire_link(now);
             }
             if ahead <= SLOT_LEAD_TICKS {
                 #[cfg(feature = "ble-gatt-event-driven")]
@@ -328,15 +356,16 @@ impl Radio {
                     set_halfword(CONTROL + 0x2e, limit);
                     set_halfword(CONTROL + 0x30, limit);
                 }
-                submit_link(self.slot, link.event, link.counter);
-                self.pending_start = Some(start);
+                let duration = submit_link(self.slot, link.event, link.counter);
+                self.pending = Some(SlotWatchdog::new(start, duration));
             }
         } else if let Some(advertisement) = self.advertisement
             && (now.wrapping_sub(self.next_advertisement) & CLOCK_MASK) < HALF_CLOCK
         {
             let start = advance_clock(now, SLOT_LEAD_TICKS);
-            submit(self.slot, &advertising_slot(start));
-            self.pending_start = Some(start);
+            let words = advertising_slot(start);
+            submit(self.slot, &words);
+            self.pending = Some(SlotWatchdog::new(start, words[5]));
             self.jitter = self
                 .jitter
                 .wrapping_mul(1_664_525)
@@ -363,7 +392,7 @@ impl LinkBackend for Radio {
     fn advertise(&mut self, advertisement: &Advertisement) -> Result<(), u32> {
         if !self.initialized
             || self.link.is_some()
-            || self.pending_start.is_some()
+            || self.pending.is_some()
             || advertisement.address.bytes() != GATT_ADDRESS
             || advertisement.parameters.channels() != 7
             || advertisement.data.as_slice().len() != LEGACY_ADV_LEN
@@ -377,10 +406,10 @@ impl LinkBackend for Radio {
     }
 
     fn stop(&mut self) -> Result<(), u32> {
-        if self.pending_start.is_some() {
+        if self.pending.is_some() {
             wait_connection_event(self.slot)?;
             self.slot = (self.slot + 1) & 15;
-            self.pending_start = None;
+            self.pending = None;
         }
         self.receiver = None;
         self.advertisement = None;
@@ -399,21 +428,19 @@ impl LinkBackend for Radio {
             return Ok(None);
         }
         let now = clock().ok_or(3_u32)?;
-        if let Some(start) = self.pending_start {
+        if let Some(pending) = self.pending {
             if let Some(status) = read_end(self.slot)? {
                 diagnostic(32, status);
-                self.pending_start = None;
+                self.pending = None;
                 self.slot = (self.slot + 1) & 15;
                 if self.link.is_some() {
                     self.connection_ended(now)?;
                 } else {
                     self.advertising_ended()?;
                 }
-            } else {
-                let elapsed = now.wrapping_sub(start) & CLOCK_MASK;
-                if (MAX_SLOT_TICKS..HALF_CLOCK).contains(&elapsed) {
-                    return Err(18);
-                }
+            } else if pending.expired(now) {
+                let now = self.restart_baseband()?;
+                self.end_link(now)?;
             }
         } else {
             self.schedule(now)?;
@@ -425,7 +452,7 @@ impl LinkBackend for Radio {
 
     fn transmit(&mut self, token: u32, frame: LinkFrame) -> Result<TxAdmission, u32> {
         let link = self.link.as_mut().ok_or(21_u32)?;
-        if self.pending_start.is_some() || link.tx.is_some() {
+        if self.pending.is_some() || link.tx.is_some() {
             return Ok(TxAdmission::Busy);
         }
         let offset = (halfword(TX_HEAD_REGISTER) & 0x3fff) * 4;
@@ -460,7 +487,7 @@ impl LinkBackend for Radio {
         }
         let update = ConnectionUpdate::decode(indication, link.counter.wrapping_sub(1))
             .map_err(|_| 24_u32)?;
-        if update.instant == link.counter && self.pending_start.is_some() {
+        if update.instant == link.counter && self.pending.is_some() {
             return Err(24);
         }
         link.timing_update = Some(update);

@@ -92,6 +92,7 @@ fn build_freertos(manifest_dir: &Path) -> Result<(), Box<dyn Error>> {
     let port = kernel.join("portable/GCC/ARM_CM33_NTZ/non_secure");
     let out_dir = PathBuf::from(env::var_os("OUT_DIR").ok_or("OUT_DIR is missing")?);
     let clang = env::var_os("FREERTOS_CLANG").unwrap_or_else(|| "clang".into());
+    let event_driven = env::var_os("CARGO_FEATURE_BLE_GATT_EVENT_DRIVEN").is_some();
     for input in [&config, &include, &port] {
         println!("cargo:rerun-if-changed={}", input.display());
     }
@@ -111,7 +112,7 @@ fn build_freertos(manifest_dir: &Path) -> Result<(), Box<dyn Error>> {
             )
             .with_extension("o");
         let mut command = Command::new(&clang);
-        if env::var_os("CARGO_FEATURE_BLE_GATT_EVENT_DRIVEN").is_some() {
+        if event_driven {
             command.arg("-DFR29_EVENT_DRIVEN=1");
             if env::var_os("CARGO_FEATURE_BLE_GATT_XIP").is_none() {
                 command.arg("-DFR29_EVENT_SRAM=1");
@@ -124,7 +125,8 @@ fn build_freertos(manifest_dir: &Path) -> Result<(), Box<dyn Error>> {
                 "-mthumb",
                 "-mfloat-abi=soft",
                 "-std=c11",
-                "-Os",
+                // Fit the event-driven SRAM image with the existing task stacks.
+                if event_driven { "-Oz" } else { "-Os" },
                 "-ffreestanding",
                 "-ffunction-sections",
                 "-fdata-sections",

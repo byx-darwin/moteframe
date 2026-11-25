@@ -255,6 +255,56 @@ fn externally_serviced_runner_delivers_notifications_and_clears_cccd_on_reconnec
     exercise_runner(true);
 }
 
+#[cfg(feature = "ble-gatt-event-driven")]
+#[test]
+fn externally_serviced_runner_re_advertises_if_att_reply_is_pending_at_disconnect() {
+    let _fixture = HOST_FIXTURE.lock().unwrap();
+    let radio = ScriptedRadio::default();
+    let mut resources = Resources::new();
+    let reports = RefCell::new(Vec::new());
+    let identity = GattIdentity {
+        address: RandomAddress::new([1, 2, 3, 4, 5, 0xc0]).unwrap(),
+        version: Version::new(8, 0xffff, 1),
+        name: "FR29-GATT",
+        advertising_data: &[2, 1, 6],
+    };
+    let mut app = pin!(run_fixture(
+        true,
+        radio.clone(),
+        &mut resources,
+        identity,
+        |report| reports.borrow_mut().push(report),
+    ));
+    let mut pump = fixture_pump(app.as_mut(), &radio, true);
+    let peer = Peer::new([7; 6], true);
+    let parameters = ConnectionParameters::new(24, 0, 72).unwrap();
+    pump_until(&mut pump, || reports.borrow().len() == 1);
+    radio.event(LinkEvent::Connected(peer, parameters));
+    pump_until(&mut pump, || reports.borrow().len() == 2);
+    radio.exchange(&mut pump, &[0x12, 10, 0, 1, 0], &[0x13]);
+    radio.inject_att(&[0x12, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8]);
+    pump_until(&mut pump, || reports.borrow().len() == 3);
+    assert!(matches!(reports.borrow()[2], GattReport::Committed(_)));
+    assert!(radio.0.borrow().replies.is_empty());
+
+    radio.event(LinkEvent::Disconnected(0x13));
+    pump_until(&mut pump, || radio.0.borrow().advertising);
+    assert_eq!(
+        reports.borrow()[3..],
+        [GattReport::Disconnected, GattReport::Advertising]
+    );
+    radio.event(LinkEvent::Connected(peer, parameters));
+    pump_until(&mut pump, || reports.borrow().len() == 6);
+    radio.exchange(&mut pump, &[0x0a, 10, 0], &[0x0b, 0, 0]);
+    radio.exchange(&mut pump, &[0x12, 10, 0, 1, 0], &[0x13]);
+    radio.exchange(&mut pump, &[0x12, 9, 0, 8, 7, 6, 5, 4, 3, 2, 1], &[0x13]);
+    pump_until(&mut pump, || !radio.0.borrow().replies.is_empty());
+    assert_eq!(
+        radio.0.borrow_mut().replies.pop_front().unwrap(),
+        [0x1b, 9, 0, 8, 7, 6, 5, 4, 3, 2, 1]
+    );
+}
+
 async fn run_fixture(
     event_driven: bool,
     radio: ScriptedRadio,

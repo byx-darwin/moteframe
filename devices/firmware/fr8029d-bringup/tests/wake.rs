@@ -4,7 +4,7 @@
 use fr8029d_bringup::{
     advertising::CLOCK_MASK,
     connection::PacketTime,
-    wake::{RadioDeadline, WakeSignal, next_delay_us},
+    wake::{RadioDeadline, SlotWatchdog, WakeSignal, next_delay_us},
 };
 
 fn clock(coarse: u32) -> PacketTime {
@@ -33,6 +33,26 @@ fn unfinished_radio_event_keeps_its_watchdog_deadline() {
     });
     assert_eq!(next_delay_us(clock(156), 0, pending, None), Some(312));
     assert_eq!(next_delay_us(clock(157), 0, pending, None), Some(0));
+}
+
+#[test]
+fn a_long_slot_stays_valid_past_50_ms_across_clock_wrap() {
+    let slot = SlotWatchdog::new(CLOCK_MASK - 2, 0x8000 | 183);
+    assert!(!slot.expired(CLOCK_MASK - 3));
+    assert!(!slot.expired(157));
+    assert_eq!(
+        next_delay_us(clock(157), 0, Some(slot.deadline()), None),
+        Some(7_812)
+    );
+    assert!(!slot.expired(181));
+    assert!(slot.expired(182));
+}
+
+#[test]
+fn a_short_advertising_slot_times_out_at_the_existing_watchdog_boundary() {
+    let slot = SlotWatchdog::new(100, 0x0acf);
+    assert!(!slot.expired(259));
+    assert!(slot.expired(260));
 }
 
 #[test]

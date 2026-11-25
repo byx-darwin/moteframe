@@ -25,6 +25,13 @@ impl CoarseTime {
         }
     }
 
+    fn rebase(&mut self, reading: u32) {
+        if self.previous.replace(reading).is_some() {
+            // The last fine reading may have been near the end of its tick.
+            self.ticks = self.ticks.saturating_add(1);
+        }
+    }
+
     fn sample(&mut self, reading: Option<u32>) -> u64 {
         if self.fault.is_none() {
             match (self.previous, reading) {
@@ -50,7 +57,7 @@ impl CoarseTime {
 }
 
 #[cfg(target_arch = "arm")]
-pub(super) use arm::run;
+pub(super) use arm::{rebase_clock, run};
 
 #[cfg(target_arch = "arm")]
 mod arm {
@@ -117,6 +124,10 @@ mod arm {
     );
     #[cfg(feature = "ble-gatt-event-driven")]
     static HOST_DEADLINE: Mutex<Cell<Option<u64>>> = Mutex::new(Cell::new(None));
+
+    pub(crate) fn rebase_clock(reading: u32) {
+        critical_section::with(|cs| TIME.0.borrow(cs).borrow_mut().rebase(reading));
+    }
 
     impl ForegroundTime {
         #[cfg(feature = "ble-gatt-event-driven")]
@@ -335,5 +346,16 @@ mod tests {
         assert_eq!(time.sample(Some(14)), 625);
         assert_eq!(time.sample(None), 625);
         assert_eq!(time.fault, Some(ClockFault::LatchTimeout));
+    }
+
+    #[test]
+    fn time_keeps_progress_after_the_baseband_clock_restarts() {
+        let mut time = CoarseTime::new();
+        assert_eq!(time.sample(Some(1_000)), 0);
+        assert_eq!(time.sample(Some(1_004)), 1_250);
+        time.rebase(2);
+        assert_eq!(time.sample(Some(2)), 1_562);
+        assert_eq!(time.sample(Some(3)), 1_875);
+        assert_eq!(time.fault, None);
     }
 }
