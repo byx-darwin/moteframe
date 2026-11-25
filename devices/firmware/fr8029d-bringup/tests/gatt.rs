@@ -14,10 +14,13 @@ use std::{
     cell::{Cell, RefCell},
     collections::VecDeque,
     future::Future,
-    pin::pin,
+    pin::{Pin, pin},
     rc::Rc,
-    sync::Mutex,
-    task::{Context, Waker},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
+    task::{Context, Wake, Waker},
 };
 
 // The pinned Host configuration has one global four-packet pool.
@@ -243,6 +246,59 @@ fn test_should_discover_read_and_commit_only_complete_write_requests() {
 
 #[test]
 fn test_should_report_committed_writes_and_resume_advertising_on_the_real_runner() {
+    exercise_runner(false);
+}
+
+#[cfg(feature = "ble-gatt-event-driven")]
+#[test]
+fn externally_serviced_runner_delivers_notifications_and_clears_cccd_on_reconnect() {
+    exercise_runner(true);
+}
+
+async fn run_fixture(
+    event_driven: bool,
+    radio: ScriptedRadio,
+    resources: &mut Resources,
+    identity: GattIdentity,
+    report: impl FnMut(GattReport),
+) -> GattRunError<()> {
+    #[cfg(feature = "ble-gatt-event-driven")]
+    if event_driven {
+        return fr8029d_bringup::gatt_runner::run_event_driven(radio, resources, identity, report)
+            .await;
+    }
+    let _ = event_driven;
+    run(radio, resources, identity, report).await
+}
+
+fn fixture_pump<'a>(
+    mut app: Pin<&'a mut impl Future<Output = GattRunError<()>>>,
+    radio: &'a ScriptedRadio,
+    event_driven: bool,
+) -> impl FnMut() + 'a {
+    struct Ready(AtomicBool);
+    impl Wake for Ready {
+        fn wake(self: Arc<Self>) {
+            self.0.store(true, Ordering::Release);
+        }
+    }
+    let ready = Arc::new(Ready(AtomicBool::new(true)));
+    let waker = Waker::from(Arc::clone(&ready));
+    move || {
+        if event_driven
+            && !ready.0.swap(false, Ordering::AcqRel)
+            && radio.0.borrow().incoming.is_empty()
+        {
+            return;
+        }
+        let mut context = Context::from_waker(if event_driven { &waker } else { Waker::noop() });
+        if let std::task::Poll::Ready(error) = app.as_mut().poll(&mut context) {
+            panic!("board runner exited with {error:?}");
+        }
+    }
+}
+
+fn exercise_runner(event_driven: bool) {
     let _fixture = HOST_FIXTURE.lock().unwrap();
     let radio = ScriptedRadio::default();
     let mut resources = Resources::new();
@@ -253,15 +309,16 @@ fn test_should_report_committed_writes_and_resume_advertising_on_the_real_runner
         name: "FR29-GATT",
         advertising_data: b"\x02\x01\x06\x0a\x09FR29-GATT",
     };
-    let mut app = pin!(run(radio.clone(), &mut resources, identity, |report| {
-        reports.borrow_mut().push(report);
-    }));
-    let mut pump = || {
-        let mut context = Context::from_waker(Waker::noop());
-        if let std::task::Poll::Ready(error) = app.as_mut().poll(&mut context) {
-            panic!("board runner exited with {error:?}");
+    let mut app = pin!(run_fixture(
+        event_driven,
+        radio.clone(),
+        &mut resources,
+        identity,
+        |event| {
+            reports.borrow_mut().push(event);
         }
-    };
+    ));
+    let mut pump = fixture_pump(app.as_mut(), &radio, event_driven);
     let peer = Peer::new([7; 6], true);
     let parameters = ConnectionParameters::new(24, 0, 72).unwrap();
     pump_until(&mut pump, || reports.borrow().len() == 1);

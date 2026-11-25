@@ -208,6 +208,57 @@ swift devices/scripts/ble_connect.swift FR29-RTOS --timeout 60
 
 2026-11-25 实机复测中，两版 SRAM 探针均进入广播阶段，FreeRTOS 版的调度时钟也在推进。Mac 验收脚本分别收到 225 和 238 条广播回调，目标名匹配均为零。被动复测同时查看广播名称和系统缓存名称，两版仍无匹配。原厂固件作为对照，在 45 秒内通过系统缓存名称匹配到两次 `802x_Ble_Periphreal`。Mac 的连接、写入、Notify 和重连仍待实机验收。各轮试验结束后均已复位回原厂应用，Flash 前 12 KiB 读回一致。
 
+后续用同一块板的 PC5 做对照，两版普通 GPIO 输入均为 0/80 个上升沿窗口，复用为 `ANT_TXEN` 后均为 33/420 个。交替开启和停止 Mac 扫描时，两版均未新增板端 `SCAN_REQ` 计数。裸机 SRAM 的临时试验将设备名也放入 `SCAN_RSP`，在 Packet RAM 读回了描述符和设备名，Mac 收到 357 条扫描回调，目标名仍为零。`ANT_TXEN` 只能确认发射使能，实际广播字段、CRC 及 Mac 未发现探针的原因仍待空口抓包。试验结束后原厂向量表、PC5 配置和 Flash 前 12 KiB 均已核对。
+
+Mac 内置控制器的 HCI 对照使用 Apple PacketLogger 27.2 的管理员实时抓取。45 秒内，CoreBluetooth 收到 404 条扫描回调，其中原厂设备按缓存名称匹配 5 次。同一窗口的 PacketLogger 输出为 0 字节。HCI 采集的原厂正对照未通过，两版 Rust 探针的 HCI 有无上报仍待验证。
+
+### 事件驱动 SRAM 候选版
+
+用 `ble-gatt-event-driven` 分别搭配 `ble-gatt-board` 和 `ble-gatt-freertos`。基带 IRQ0 和 TIMER0 分别处理无线事件完成和最早截止时间。裸机通过 WFI 等待，FreeRTOS 的 BLE 任务通过任务通知等待。两版使用同一套 GATT 服务和 8 字节 Notify 回显。ISR 记录唤醒，BLE 前台仍串行读取和确认基带状态。
+
+本地已生成的 J-Link 装载脚本位于 `target/fr8029d-event-driven-check/night-trial`。如需重建，从仓库根目录执行以下命令。FreeRTOS 使用下节所述固定版本的内核检出，可通过 `FREERTOS_KERNEL_DIR` 指定。
+
+```sh
+fr_build=target/fr8029d-event-driven-check
+fr_manifest=devices/firmware/fr8029d-bringup/Cargo.toml
+fr_tools=devices/firmware/fr8029d-bringup/tools
+fr_elf=thumbv8m.main-none-eabi/release/fr8029d-ble-adv
+cargo build --offline --locked --release --manifest-path "$fr_manifest" \
+  --target thumbv8m.main-none-eabi --features ble-gatt-board,ble-gatt-event-driven \
+  --target-dir "$fr_build/bare-sram" --bin fr8029d-ble-adv
+cargo build --offline --locked --release --manifest-path "$fr_manifest" \
+  --target thumbv8m.main-none-eabi --features ble-gatt-freertos,ble-gatt-event-driven \
+  --target-dir "$fr_build/rtos-sram" --bin fr8029d-ble-adv
+fr_pack=$(mktemp -d "$fr_build/trial.XXXXXX")
+python3 "$fr_tools/gatt_notify_memory.py" pack "$fr_build/bare-sram/$fr_elf" \
+  "$fr_pack/FR29-GAT2-event.tcl"
+python3 "$fr_tools/gatt_notify_memory.py" pack "$fr_build/rtos-sram/$fr_elf" \
+  "$fr_pack/FR29-RTOS-event.tcl"
+```
+
+每轮只装载一个镜像。以下用裸机举例，换成 FreeRTOS 时两边都用 `FR29-RTOS`。
+
+```sh
+fr_tools=devices/firmware/fr8029d-bringup/tools
+fr_pack=${fr_pack:-target/fr8029d-event-driven-check/night-trial}
+fr_trial=$(mktemp -d /tmp/fr8029d-event-trial.XXXXXX)
+openocd -f "$fr_tools/fr8029d_openocd.cfg" \
+  -f "$fr_pack/FR29-GAT2-event.tcl" -f "$fr_tools/gatt_notify_sram_trial.tcl" \
+  -c "run_notify_trial 90 {$fr_trial/stock-prefix.bin} 2" -c shutdown
+```
+
+看到 `NOTIFY_ADVERTISING` 后在另一终端运行 `swift devices/scripts/ble_connect.swift FR29-GAT2 --timeout 60`。Mac 端核对两次独立连接的写确认和 Notify，J-Link 端核对两次 `TX_QUEUE_CONFIRMED`，试验结尾应有 `STOCK_RESTORED`。如果 Mac 停在扫描阶段，仍可查看 `WAKE_STATS`。`WAIT_ATTEMPTS` 统计进入等待前的尝试，实际阻塞需要用调试状态核对。`MIN_LEAD_TICKS` 以 312.5 µs 为单位，`0xffffffff` 表示本轮未提交连接事件。`STACK_WATERMARK` 记录本轮实际栈覆盖深度。
+
+| 事件驱动候选版 | 裸机 | FreeRTOS |
+| --- | ---: | ---: |
+| Flash 执行版负载 | 64,244 B | 68,000 B |
+| 较改造前的 Flash 增量 | +5,256 B | +6,440 B |
+| Flash 执行版静态 SRAM（含对齐） | 264 B | 616 B |
+| Flash 执行版栈预留 | 22,272 B | 19,200 B |
+| SRAM 试验版栈预留 | 16,128 B | 16,640 B |
+
+这些数字来自 ELF。SRAM 试验版将镜像和栈放在同一 SRAM 区域，FreeRTOS 的 BLE 任务预留 14 KiB，主栈预留 1,280 B，Idle 栈预留 1 KiB。实机栈水位和连接窗口余量待复测。相同目录下的 `*-polling.tcl` 是轮询对照镜像。
+
 ## FreeRTOS 单应用任务
 
 `ble-gatt-freertos` 把同一个 Rust BLE 循环放进一个静态分配的 FreeRTOS 任务。内核另有一个 Idle 任务。射频、Host 和 GATT 继续使用 Rust 实现，RTOS 部分使用上游 FreeRTOS-Kernel V11.2.0 的 Cortex-M33 端口和 C 内核。BLE 任务栈为 16 KiB，Idle 栈为 1 KiB，中断主栈为 1792 B。内核使用静态分配。

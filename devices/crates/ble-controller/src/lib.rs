@@ -20,4 +20,6 @@ mod event;
 mod hci;
 pub use command::CommandReply;
 pub use event::HciBuffer;
+#[cfg(feature = "external-wake")]
+pub use hci::HciControllerRef;
 pub use hci::{HciController, HciError};

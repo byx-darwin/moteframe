@@ -36,6 +36,9 @@ fn main() -> Result<(), Box<dyn Error>> {
             !gatt_xip && (connect_probe || env::var_os("CARGO_FEATURE_BLE_ADV_COLD_XIP").is_none());
         if gatt_board {
             println!("cargo:rustc-link-arg-bin=fr8029d-ble-adv=--defsym=__gatt_board_probe=1");
+            if env::var_os("CARGO_FEATURE_BLE_GATT_EVENT_DRIVEN").is_some() {
+                println!("cargo:rustc-link-arg-bin=fr8029d-ble-adv=--defsym=__gatt_event_wake=1");
+            }
         } else if connect_probe {
             println!("cargo:rustc-link-arg-bin=fr8029d-ble-adv=--defsym=__wide_sram_probe=1");
         }
@@ -107,7 +110,14 @@ fn build_freertos(manifest_dir: &Path) -> Result<(), Box<dyn Error>> {
                     .ok_or("FreeRTOS source name is missing")?,
             )
             .with_extension("o");
-        let status = Command::new(&clang)
+        let mut command = Command::new(&clang);
+        if env::var_os("CARGO_FEATURE_BLE_GATT_EVENT_DRIVEN").is_some() {
+            command.arg("-DFR29_EVENT_DRIVEN=1");
+            if env::var_os("CARGO_FEATURE_BLE_GATT_XIP").is_none() {
+                command.arg("-DFR29_EVENT_SRAM=1");
+            }
+        }
+        let status = command
             .args([
                 "--target=thumbv8m.main-none-eabi",
                 "-mcpu=cortex-m33",

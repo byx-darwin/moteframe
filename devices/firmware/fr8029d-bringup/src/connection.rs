@@ -319,6 +319,15 @@ pub struct PacketTime {
 }
 
 impl PacketTime {
+    /// Last fine-counter value at the start of a coarse tick.
+    pub const FINE_AT_BOUNDARY: u16 = LAST_FINE_COUNT;
+
+    /// Elapsed half-microseconds since the last coarse tick boundary.
+    #[must_use]
+    pub const fn elapsed_half_us(self) -> u16 {
+        LAST_FINE_COUNT.saturating_sub(self.fine_countdown)
+    }
+
     /// Corrects a 1M data RX timestamp to the central's packet-start anchor.
     ///
     /// Pass the first CRC-valid data PDU timestamp for the connection event.

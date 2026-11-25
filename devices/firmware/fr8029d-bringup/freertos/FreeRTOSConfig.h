@@ -14,7 +14,12 @@
 #define configUSE_IDLE_HOOK                   0
 #define configUSE_TICK_HOOK                   0
 #define configUSE_TIMERS                      0
+#ifdef FR29_EVENT_DRIVEN
+#define configUSE_TASK_NOTIFICATIONS          1
+#define INCLUDE_vTaskSuspend                  1
+#else
 #define configUSE_TASK_NOTIFICATIONS          0
+#endif
 #define configSUPPORT_STATIC_ALLOCATION       1
 #define configSUPPORT_DYNAMIC_ALLOCATION      0
 #define configCHECK_FOR_STACK_OVERFLOW         2

@@ -38,6 +38,7 @@ class Image:
     stacks: dict
     task_stack_padding_bytes: int
     runtime_words: dict
+    event_driven: bool
 
     @property
     def payload_bytes(self):
@@ -49,6 +50,7 @@ class Image:
         return {
             "elf_sha256": self.digest,
             "identity": self.identity,
+            "event_driven": self.event_driven,
             "image_payload_bytes": self.payload_bytes,
             "data_bytes": self.data_bytes,
             "bss_bytes": self.bss_bytes,
@@ -149,6 +151,17 @@ def inspect_image(blob, *, xip):
     if msp != address("__stack_top") or msp % 8 or bottom % 8 or bottom >= msp:
         raise ValueError("Invalid initial MSP or linker stack reservation")
 
+    wake_vectors = {0: "fr29_baseband_irq", 16: "fr29_timer_irq"}
+    event_driven = "__gatt_event_wake" in symbols
+    if not event_driven and any(name in symbols for name in wake_vectors.values()):
+        raise ValueError("Wake handlers require the event-driven linker layout")
+    if event_driven:
+        for irq, name in wake_vectors.items():
+            handler = address(name) | 1
+            actual, = struct.unpack_from("<I", loads[0][1], (16 + irq) * 4)
+            if actual != handler or not vector + VECTOR_BYTES <= handler - 1 < vector + len(loads[0][1]):
+                raise ValueError(f"Invalid event wake vector for IRQ {irq}")
+
     diag = by_name.get(".diagnostics")
     if (diag is None or diag[1] != 8 or diag[3] != address("__diagnostics_start")
             or diag[5] != DIAGNOSTIC_BYTES or diag[3] % 4):
@@ -217,6 +230,7 @@ def inspect_image(blob, *, xip):
         data_bss_alignment_bytes=sbss - edata, static_bytes=ebss - sdata,
         diagnostics=(diag[3], diag[5]), stacks=stacks, task_stack_padding_bytes=task_stack_padding,
         runtime_words=runtime_words,
+        event_driven=event_driven,
     )
 
 
@@ -228,6 +242,7 @@ def render_trial(image):
         f"set notify_vector {image.vector:#x}",
         f"set notify_entry {image.entry:#x}",
         f"set notify_diag {image.diagnostics[0]:#x}",
+        f"set notify_event_driven {int(image.event_driven)}",
         "set notify_runtime_words {" + " ".join(
             f"{label} {value:#x}" for label, value in image.runtime_words.items()
         ) + "}",

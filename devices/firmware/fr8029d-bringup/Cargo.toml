@@ -30,6 +30,7 @@ ble-gatt-probe = ["dep:ble-controller", "dep:ble-host-trouble", "dep:embassy-syn
 ble-gatt-board = ["ble-connect-probe", "ble-gatt-probe", "dep:critical-section", "dep:embassy-time-driver"]
 ble-gatt-xip = ["ble-gatt-board", "ble-adv-cold-xip"]
 ble-gatt-freertos = ["ble-gatt-board"]
+ble-gatt-event-driven = ["ble-gatt-probe", "ble-controller/external-wake"]
 
 [[bin]]
 name = "fr8029d-bringup"

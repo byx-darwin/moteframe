@@ -108,16 +108,47 @@ pub enum GattRunError<E> {
 /// across connections. The reporter should return promptly to allow radio polling.
 ///
 /// Returns the first fault for the board to handle after the pending tasks drop.
-pub async fn run<B: LinkBackend, F: FnMut(GattReport)>(
+pub fn run<B: LinkBackend, F: FnMut(GattReport)>(
+    backend: B,
+    resources: &mut Resources,
+    identity: GattIdentity,
+    report: F,
+) -> impl Future<Output = GattRunError<B::Error>> {
+    let hci = HciController::new(Controller::new(backend, identity.version));
+    run_hci(hci, resources, identity, report, || Ok(()))
+}
+
+/// Runs the same GATT application with owner-driven radio service.
+/// The caller polls on IRQ, timer and software wakes on one executor.
+#[cfg(feature = "ble-gatt-event-driven")]
+pub async fn run_event_driven<B: LinkBackend, F: FnMut(GattReport)>(
     backend: B,
     resources: &mut Resources,
     identity: GattIdentity,
     report: F,
 ) -> GattRunError<B::Error> {
+    let hci = HciController::new_with_external_wake(Controller::new(backend, identity.version));
+    run_hci(hci.borrowed(), resources, identity, report, || {
+        hci.service()
+    })
+    .await
+}
+
+async fn run_hci<C, E, F>(
+    hci: C,
+    resources: &mut Resources,
+    identity: GattIdentity,
+    report: F,
+    mut service: impl FnMut() -> Result<(), HciError<E>>,
+) -> GattRunError<E>
+where
+    C: ble_host_trouble::host::Controller<Error = HciError<E>>,
+    E: fmt::Debug,
+    F: FnMut(GattReport),
+{
     if AdvertisingData::new(identity.advertising_data).is_err() {
         return GattRunError::Host(BleHostError::BleHost(Error::InvalidValue));
     }
-    let hci = HciController::new(Controller::new(backend, identity.version));
     let stack = build(hci, resources, identity.address);
     let (mut rx, mut control, mut tx) = stack.runner().split();
     let mut rx = pin!(rx.run());
@@ -125,6 +156,9 @@ pub async fn run<B: LinkBackend, F: FnMut(GattReport)>(
     let mut control = pin!(control.run());
     let mut app = pin!(serve(&stack, identity, report));
     poll_fn(|cx| {
+        if let Err(error) = service() {
+            return Poll::Ready(GattRunError::Host(BleHostError::Controller(error)));
+        }
         if let Poll::Ready(result) =
             poll_host_runners(tx.as_mut(), rx.as_mut(), control.as_mut(), cx)
         {
@@ -142,11 +176,16 @@ pub async fn run<B: LinkBackend, F: FnMut(GattReport)>(
     .await
 }
 
-async fn serve<B: LinkBackend, F: FnMut(GattReport)>(
-    stack: &Stack<'_, HciController<B>, DefaultPacketPool>,
+async fn serve<C, E, F>(
+    stack: &Stack<'_, C, DefaultPacketPool>,
     identity: GattIdentity,
     mut report: F,
-) -> Result<Infallible, GattRunError<B::Error>> {
+) -> Result<Infallible, GattRunError<E>>
+where
+    C: ble_host_trouble::host::Controller<Error = HciError<E>>,
+    E: fmt::Debug,
+    F: FnMut(GattReport),
+{
     let mut storage = [0; VALUE_LEN];
     let mut table = AttributeTable::<NoopRawMutex, ATTRIBUTES>::new();
     GapConfig::default(identity.name)

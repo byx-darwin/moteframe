@@ -11,6 +11,38 @@ TOOLS = Path(__file__).resolve().parent
 
 @unittest.skipUnless(TCLSH, "tclsh is required to exercise the SWD observer")
 class NotifyTrialTests(unittest.TestCase):
+    def test_reports_event_wake_counters_only_for_the_event_image(self):
+        result = subprocess.run(
+            [TCLSH],
+            input=r"""
+source gatt_notify_sram_trial.tcl
+set ::notify_diag 0x20007d00
+proc echo {message} {puts $message}
+proc read_memory {address width count} {
+    if {$address != 0x20007de4 || $width != 32 || $count != 4} {
+        error "unexpected wake counter read"
+    }
+    return {4 5 9 0xb}
+}
+if {[catch {
+    notify_report_wake
+    set ::notify_event_driven 0
+    notify_report_wake
+    set ::notify_event_driven 1
+    notify_report_wake
+} message]} {
+    puts stderr $message
+    exit 1
+}
+""",
+            cwd=TOOLS,
+            text=True,
+            capture_output=True,
+            timeout=5,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "WAKE_STATS RADIO_IRQ=4 TIMER_IRQ=5 WAIT_ATTEMPTS=9 MIN_LEAD_TICKS=0xb\n")
+
     def test_waits_for_fresh_tx_on_the_reconnected_session(self):
         result = subprocess.run(
             [TCLSH],

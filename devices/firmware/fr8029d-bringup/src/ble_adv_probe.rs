@@ -23,9 +23,11 @@ use fr8029d_bringup::{
 };
 
 global_asm!(
-    ".set __fr29_use_freertos, {enabled}",
+    ".set __fr29_use_freertos, {freertos}",
+    ".set __fr29_use_event_wake, {event_wake}",
     include_str!("startup.s"),
-    enabled = const cfg!(feature = "ble-gatt-freertos") as u8,
+    freertos = const cfg!(feature = "ble-gatt-freertos") as u8,
+    event_wake = const cfg!(all(feature = "ble-gatt-board", feature = "ble-gatt-event-driven")) as u8,
 );
 
 #[cfg(feature = "ble-adv-cold")]
@@ -39,6 +41,8 @@ mod connect_radio;
 mod gatt_board_radio;
 #[cfg(feature = "ble-gatt-board")]
 mod gatt_board_time;
+#[cfg(all(feature = "ble-gatt-board", feature = "ble-gatt-event-driven"))]
+mod gatt_board_wake;
 
 #[cfg(feature = "ble-adv-cold")]
 fn read8(address: usize) -> u8 {
@@ -130,8 +134,8 @@ fn diagnostic(index: usize, value: u32) {
 
 #[cfg(feature = "ble-gatt-board")]
 fn increment(index: usize) {
-    // SAFETY: The board-only trace producers use fixed indices in the
-    // diagnostic region and run on this one cooperative foreground thread.
+    // SAFETY: Each trace index has one producer on this core. IRQ counters
+    // use separate indices from the foreground counters.
     let previous =
         unsafe { read_volatile((&raw const __diagnostics_start).cast::<u32>().add(index)) };
     diagnostic(index, previous.saturating_add(1));

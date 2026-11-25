@@ -45,6 +45,14 @@ proc notify_diag {} {
     return [read_memory [expr {$::notify_diag + 40 * 4}] 32 17]
 }
 
+proc notify_report_wake {} {
+    if {![info exists ::notify_event_driven] || !$::notify_event_driven} {return}
+    set words [read_memory [expr {$::notify_diag + 57 * 4}] 32 4]
+    if {[llength $words] != 4} {error "Short event wake diagnostic read"}
+    lassign $words radio timer waits lead
+    echo "WAKE_STATS RADIO_IRQ=$radio TIMER_IRQ=$timer WAIT_ATTEMPTS=$waits MIN_LEAD_TICKS=$lead"
+}
+
 proc notify_wait_advertising {} {
     for {set i 0} {$i < 60} {incr i} {
         set diag [notify_diag]
@@ -221,6 +229,7 @@ proc run_notify_trial {seconds {prefix_path {}} {sessions 1}} {
         set sample_failure [catch {
             halt 1500
             echo "NOTIFY_FINAL [notify_diag]"
+            notify_report_wake
             foreach stack $::notify_stacks {
                 lassign $stack label base size paint
                 set touched [notify_stack_touched $base $size $paint]

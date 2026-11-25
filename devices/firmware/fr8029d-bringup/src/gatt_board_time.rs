@@ -55,7 +55,9 @@ pub(super) use arm::run;
 #[cfg(target_arch = "arm")]
 mod arm {
     use super::{ClockFault, CoarseTime};
-    use crate::{clock, diagnostic, gatt_board_radio::GATT_ADDRESS};
+    #[cfg(not(feature = "ble-gatt-event-driven"))]
+    use crate::clock;
+    use crate::{diagnostic, gatt_board_radio::GATT_ADDRESS};
     use ble_controller::{ControllerError, HciError, LinkBackend, RandomAddress, Version};
     use ble_host_trouble::host::prelude::BleHostError;
     use core::{
@@ -68,7 +70,20 @@ mod arm {
     };
     use critical_section::Mutex;
     use embassy_time_driver::Driver;
-    use fr8029d_bringup::gatt_runner::{self, GattIdentity, GattReport, GattRunError, Resources};
+    #[cfg(not(feature = "ble-gatt-event-driven"))]
+    use fr8029d_bringup::gatt_runner::run as run_gatt;
+    #[cfg(feature = "ble-gatt-event-driven")]
+    use fr8029d_bringup::gatt_runner::run_event_driven as run_gatt;
+    use fr8029d_bringup::gatt_runner::{GattIdentity, GattReport, GattRunError, Resources};
+    #[cfg(feature = "ble-gatt-event-driven")]
+    use {
+        crate::gatt_board_wake as wake,
+        core::cell::Cell,
+        fr8029d_bringup::{
+            connection::PacketTime,
+            wake::{RadioDeadline, next_delay_us},
+        },
+    };
 
     struct SingleCore;
     critical_section::set_impl!(SingleCore);
@@ -100,9 +115,27 @@ mod arm {
     embassy_time_driver::time_driver_impl!(
         static TIME: ForegroundTime = ForegroundTime(Mutex::new(RefCell::new(CoarseTime::new())))
     );
+    #[cfg(feature = "ble-gatt-event-driven")]
+    static HOST_DEADLINE: Mutex<Cell<Option<u64>>> = Mutex::new(Cell::new(None));
 
     impl ForegroundTime {
+        #[cfg(feature = "ble-gatt-event-driven")]
+        fn sample_precise(&self, reading: Option<PacketTime>) -> (u64, Option<ClockFault>) {
+            critical_section::with(|cs| {
+                let mut state = self.0.borrow(cs).borrow_mut();
+                let coarse_us = state.sample(reading.map(|now| now.coarse));
+                let fine_half_us = reading.map_or(0, PacketTime::elapsed_half_us);
+                // Respect the half microsecond of the extended tick count.
+                let fine_us = u64::midpoint(u64::from(fine_half_us), state.ticks % 2);
+                let time = coarse_us.saturating_add(fine_us);
+                (time, state.fault)
+            })
+        }
+
         fn sample(&self) -> (u64, Option<ClockFault>) {
+            #[cfg(feature = "ble-gatt-event-driven")]
+            return self.sample_precise(wake::snapshot());
+            #[cfg(not(feature = "ble-gatt-event-driven"))]
             critical_section::with(|cs| {
                 let mut state = self.0.borrow(cs).borrow_mut();
                 let time = state.sample(clock());
@@ -116,10 +149,17 @@ mod arm {
             self.sample().0
         }
 
-        fn schedule_wake(&self, _at: u64, waker: &Waker) {
-            // The sole foreground executor polls every lane on every pass.
-            // Its no-op waker requires neither timer interrupts nor a queue.
+        fn schedule_wake(&self, at: u64, waker: &Waker) {
+            #[cfg(feature = "ble-gatt-event-driven")]
+            critical_section::with(|cs| {
+                // One executor polls every lane on each wake. All timers in
+                // this image share its waker, so only the earliest is needed.
+                let deadline = HOST_DEADLINE.borrow(cs);
+                deadline.set(Some(deadline.get().map_or(at, |earliest| earliest.min(at))));
+            });
+            #[cfg(not(feature = "ble-gatt-event-driven"))]
             waker.wake_by_ref();
+            let _ = (at, waker);
         }
     }
 
@@ -210,24 +250,46 @@ mod arm {
             };
             let mut resources = Resources::new();
             let mut report = Report::default();
-            let mut app = pin!(gatt_runner::run(
-                backend,
-                &mut resources,
-                identity,
-                |event| {
-                    report.record(event);
-                }
-            ));
+            #[cfg(feature = "ble-gatt-event-driven")]
+            wake::init();
+            let mut app = pin!(run_gatt(backend, &mut resources, identity, |event| {
+                report.record(event);
+            }));
+            #[cfg(feature = "ble-gatt-event-driven")]
+            let waker = wake::waker();
+            #[cfg(feature = "ble-gatt-event-driven")]
+            let mut context = Context::from_waker(&waker);
+            #[cfg(not(feature = "ble-gatt-event-driven"))]
             let mut context = Context::from_waker(Waker::noop());
             loop {
+                #[cfg(feature = "ble-gatt-event-driven")]
+                {
+                    wake::begin_pass();
+                    critical_section::with(|cs| HOST_DEADLINE.borrow(cs).set(None));
+                }
                 if let Poll::Ready(error) = app.as_mut().poll(&mut context) {
                     diagnostic(APP_FAULT, app_fault(&error));
                     break;
                 }
                 // Also sample when the idle Host performs no time queries.
-                if let Some(fault) = TIME.sample().1 {
+                #[cfg(feature = "ble-gatt-event-driven")]
+                let snapshot = wake::snapshot();
+                #[cfg(feature = "ble-gatt-event-driven")]
+                let (now_us, fault) = TIME.sample_precise(snapshot);
+                #[cfg(not(feature = "ble-gatt-event-driven"))]
+                let (_, fault) = TIME.sample();
+                if let Some(fault) = fault {
                     diagnostic(CLOCK_FAULT, fault as u32);
                     break;
+                }
+                #[cfg(feature = "ble-gatt-event-driven")]
+                if let Some(now) = snapshot {
+                    let radio = wake::radio_deadline();
+                    let host = critical_section::with(|cs| HOST_DEADLINE.borrow(cs).get());
+                    wake::wait(
+                        next_delay_us(now, now_us, radio, host),
+                        matches!(radio, Some(RadioDeadline::Completion { .. })),
+                    );
                 }
             }
         } else {

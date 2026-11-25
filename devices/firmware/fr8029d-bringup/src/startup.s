@@ -5,6 +5,9 @@
 .ifndef __fr29_use_freertos
 .set __fr29_use_freertos, 0
 .endif
+.ifndef __fr29_use_event_wake
+.set __fr29_use_event_wake, 0
+.endif
 
 .section .vectors, "a", %progbits
 .balign 512
@@ -33,9 +36,20 @@ __vector_table:
     .word Default_Handler       // PendSV
     .word Default_Handler       // SysTick
     .endif
+    .if __fr29_use_event_wake
+    .word fr29_baseband_irq       // External IRQ 0, BB_IP
+    .rept 15
+        .word Default_Handler
+    .endr
+    .word fr29_timer_irq          // External IRQ 16, TIMER0
+    .rept 47
+        .word Default_Handler
+    .endr
+    .else
     .rept 64                     // Covers FR802x device IRQs 0–49
         .word Default_Handler
     .endr
+    .endif
 
 .section .text.Reset_Handler, "ax", %progbits
 .global Reset_Handler

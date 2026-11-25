@@ -146,6 +146,18 @@ impl<B: LinkBackend> Controller<B> {
     pub(crate) const fn initialized(&self) -> bool {
         !matches!(self.state, RunState::Fresh)
     }
+    #[cfg(feature = "external-wake")]
+    pub(crate) const fn faulted(&self) -> bool {
+        matches!(self.state, RunState::Faulted)
+    }
+    #[cfg(feature = "external-wake")]
+    pub(crate) const fn has_events(&self) -> bool {
+        !self.events.is_empty()
+    }
+    #[cfg(feature = "external-wake")]
+    pub(crate) const fn has_acl_room(&self) -> bool {
+        self.pending_acl < 4 && !self.tx.is_full()
+    }
     /// Backend access for board scheduling; do not mutate active hardware outside this Controller.
     pub fn backend_mut(&mut self) -> &mut B {
         &mut self.backend

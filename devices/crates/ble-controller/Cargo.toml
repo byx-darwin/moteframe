@@ -8,6 +8,9 @@ publish.workspace = true
 [lints]
 workspace = true
 
+[features]
+external-wake = []
+
 [dependencies]
 bt-hci.workspace = true
 embedded-io.workspace = true

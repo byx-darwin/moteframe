@@ -9,6 +9,8 @@ pub mod gatt;
 #[cfg(feature = "ble-gatt-probe")]
 pub mod gatt_runner;
 pub mod radio_trim;
+#[cfg(feature = "ble-gatt-probe")]
+pub mod wake;
 
 /// Start of the flash application slot used by the boot ROM.
 pub const XIP_ENTRY: u32 = 0x1000_2000;

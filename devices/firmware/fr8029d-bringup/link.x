@@ -2,19 +2,22 @@ ENTRY(Reset_Handler)
 
 __sram_image_size = DEFINED(__wide_sram_probe) ? 8K : 4K;
 __gatt_sram = DEFINED(__gatt_board_probe) && DEFINED(__probe_in_sram);
+__gatt_event = DEFINED(__gatt_event_wake);
 __rtos = DEFINED(__gatt_freertos);
-__image_origin = __gatt_sram ? (__rtos ? 0x20008000 : 0x20009800) :
+__event_rtos_sram = __gatt_sram && __gatt_event && __rtos;
+__image_origin = __gatt_sram ? (__rtos ? (__gatt_event ? 0x20007600 : 0x20008000)
+                                    : (__gatt_event ? 0x20008000 : 0x20009800)) :
     (DEFINED(__probe_in_sram) ? 0x20003000 : 0x10002000);
-__image_length = __rtos ? (__gatt_sram ? 64K : 72K) :
-    (DEFINED(__gatt_board_probe) ? (__gatt_sram ? 58K : 60K) :
-    (DEFINED(__probe_in_sram) ? __sram_image_size : 1016K));
+__image_length = __gatt_sram ? 0x20018000 - __image_origin :
+    (__rtos ? 72K : (DEFINED(__gatt_board_probe) ? (__gatt_event ? 64K : 60K) :
+    (DEFINED(__probe_in_sram) ? __sram_image_size : 1016K)));
 __ram_origin = DEFINED(__probe_in_sram) && !DEFINED(__gatt_board_probe)
     ? 0x20003000 + __sram_image_size : 0x20003000;
 __ram_limit = __rtos ? 0x20003400 :
     (DEFINED(__gatt_board_probe) ? 0x20004000 : 0x20006f00);
-__diag_origin = __rtos ? 0x20007f00 :
-    (DEFINED(__gatt_board_probe) ? 0x20009700 : 0x20006f00);
-__stack_bottom = __rtos ? 0x20007800 :
+__diag_origin = __gatt_sram ? __image_origin - 0x100 : (__rtos ? 0x20007f00 :
+    (DEFINED(__gatt_board_probe) ? 0x20009700 : 0x20006f00));
+__stack_bottom = __rtos ? (__event_rtos_sram ? 0x20007000 : 0x20007800) :
     (DEFINED(__gatt_board_probe) ? 0x20004000 : 0x20007000);
 __stack_limit = DEFINED(__gatt_board_probe) ? __diag_origin : 0x20008000;
 

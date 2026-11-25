@@ -24,6 +24,8 @@ use fr8029d_bringup::{
     },
     connection::{ConnectionEvent, ConnectionRequest, ConnectionUpdate, PacketTime},
 };
+#[cfg(feature = "ble-gatt-event-driven")]
+use {super::gatt_board_wake, fr8029d_bringup::wake::RadioDeadline};
 
 const HALF_CLOCK: u32 = CLOCK_MASK.div_ceil(2);
 const CONTROL: usize = PACKET_RAM + CONNECTION_CONTROL as usize;
@@ -200,6 +202,26 @@ impl Radio {
         }
     }
 
+    #[cfg(feature = "ble-gatt-event-driven")]
+    fn publish_deadline(&self) {
+        let deadline = if let Some(start) = self.pending_start {
+            Some(RadioDeadline::Completion {
+                start,
+                timeout: MAX_SLOT_TICKS,
+            })
+        } else if let Some(link) = &self.link {
+            Some(RadioDeadline::Connection {
+                start: link.event.start.coarse,
+                lead: SLOT_LEAD_TICKS,
+            })
+        } else {
+            self.advertisement.map(|_| RadioDeadline::Advertising {
+                at: self.next_advertisement,
+            })
+        };
+        gatt_board_wake::set_radio_deadline(deadline);
+    }
+
     fn start_advertising(&mut self, now: u32, advertisement: &Advertisement) {
         write_record(
             PACKET_RAM + usize::from(CONTROL_OFFSET),
@@ -210,6 +232,8 @@ impl Radio {
         }
         self.receiver = Some(Receiver::start());
         self.next_advertisement = now;
+        #[cfg(feature = "ble-gatt-event-driven")]
+        self.publish_deadline();
     }
 
     fn advertising_ended(&mut self) -> Result<(), u32> {
@@ -296,6 +320,8 @@ impl Radio {
                 return Err(23);
             }
             if ahead <= SLOT_LEAD_TICKS {
+                #[cfg(feature = "ble-gatt-event-driven")]
+                gatt_board_wake::record_connection_lead(ahead);
                 link.apply_map_at_instant();
                 if link.parameters_changed {
                     let limit = 2 * link.request.interval - 3;
@@ -360,6 +386,8 @@ impl LinkBackend for Radio {
         self.advertisement = None;
         self.link = None;
         self.events.clear();
+        #[cfg(feature = "ble-gatt-event-driven")]
+        self.publish_deadline();
         Ok(())
     }
 
@@ -390,6 +418,8 @@ impl LinkBackend for Radio {
         } else {
             self.schedule(now)?;
         }
+        #[cfg(feature = "ble-gatt-event-driven")]
+        self.publish_deadline();
         Ok(self.events.pop())
     }
 
