@@ -27,7 +27,6 @@ use wattch5_bringup::{LinkStage, ObservedReset, Readiness, ResetGate};
 use wattch5_candidate::gatt::{
     Bridge, ControlProfile, ControlUuids, TroubleTransport, drive_connection,
 };
-#[path = "../../ble-host-probe/src/exit_diagnostic.rs"]
 mod host_diagnostic;
 #[cfg(feature = "native-health")]
 mod native_health;
