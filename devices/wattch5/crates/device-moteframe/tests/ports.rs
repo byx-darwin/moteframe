@@ -41,6 +41,8 @@ fn test_should_forward_native_ui_pixels_directly_without_splitting_a_valid_windo
         (2, 1),
     ));
     compat.inner_mut().initialize(&[], &mut Delay).unwrap();
+    let size: moteframe_core::Dimensions = compat.dimensions();
+    assert_eq!(size, Dimensions::new(128, 128));
     let colors = [Native::from(RawU16::new(0xf800)); 40];
     MoteDisplay::write(
         &mut DisplayRef::new(&mut compat),
@@ -67,7 +69,7 @@ fn test_should_preserve_legacy_raw_pixels_and_stop_on_actual_native_error() {
     let mut compat = NativeDisplay::new(d);
     assert!(
         compat
-            .write(Rect::new(0, 0, 1, 1), &[Rgb565(0xf800)])
+            .write(moteframe_core::Rect::new(0, 0, 1, 1), &[Rgb565(0xf800)])
             .is_err()
     );
     assert!(

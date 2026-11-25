@@ -1,65 +1,7 @@
 //! Hardware independent display and board contracts. No heap, RTOS or vendor types.
 #![no_std]
 
-/// Panel size in logical pixels.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Dimensions {
-    /// Width in pixels.
-    pub width: u16,
-    /// Height in pixels.
-    pub height: u16,
-}
-impl Dimensions {
-    /// Creates panel dimensions. Zero dimensions admit no valid rectangle.
-    #[must_use]
-    pub const fn new(width: u16, height: u16) -> Self {
-        Self { width, height }
-    }
-}
-
-/// A rectangle with an exclusive end, expressed by origin and extent.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Rect {
-    /// Left coordinate.
-    pub x: u16,
-    /// Top coordinate.
-    pub y: u16,
-    /// Width in pixels.
-    pub width: u16,
-    /// Height in pixels.
-    pub height: u16,
-}
-impl Rect {
-    /// Creates a rectangle; drivers validate it before I/O.
-    #[must_use]
-    pub const fn new(x: u16, y: u16, width: u16, height: u16) -> Self {
-        Self {
-            x,
-            y,
-            width,
-            height,
-        }
-    }
-    /// Whether the nonempty rectangle fits without coordinate overflow.
-    #[must_use]
-    pub fn fits(self, dimensions: Dimensions) -> bool {
-        self.width > 0
-            && self.height > 0
-            && self
-                .x
-                .checked_add(self.width)
-                .is_some_and(|end| end <= dimensions.width)
-            && self
-                .y
-                .checked_add(self.height)
-                .is_some_and(|end| end <= dimensions.height)
-    }
-    /// Number of pixels; multiplication uses a wide intermediate on 32-bit targets.
-    #[must_use]
-    pub const fn area(self) -> u32 {
-        self.width as u32 * self.height as u32
-    }
-}
+pub use moteframe_core::{Dimensions, Rect};
 
 /// A packed RGB565 pixel. Transport byte order is specified by the driver.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

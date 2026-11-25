@@ -11,6 +11,7 @@ workspace = true
 [dependencies]
 embedded-hal.workspace = true
 embedded-graphics-core = { version = "=0.4.1", default-features = false, optional = true }
+moteframe-core = { path = "../../../../crates/moteframe-core", version = "=0.2.0", default-features = false }
 
 [features]
 native-colors = ["dep:embedded-graphics-core"]

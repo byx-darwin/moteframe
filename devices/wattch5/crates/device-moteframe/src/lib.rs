@@ -56,13 +56,11 @@ impl<'a, D: ?Sized> DisplayRef<'a, D> {
 impl<D: Legacy + ?Sized> Display for DisplayRef<'_, D> {
     type Color = Native;
     type Error = device_core::NativeWriteError<D::Error>;
-    fn dimensions(&self) -> moteframe_core::Dimensions {
-        let d = self.0.dimensions();
-        moteframe_core::Dimensions::new(d.width, d.height)
+    fn dimensions(&self) -> Dimensions {
+        self.0.dimensions()
     }
-    fn write(&mut self, r: moteframe_core::Rect, p: &[Native]) -> Result<(), Self::Error> {
-        self.0
-            .write_rgb565(Rect::new(r.x, r.y, r.width, r.height), p)
+    fn write(&mut self, r: Rect, p: &[Native]) -> Result<(), Self::Error> {
+        self.0.write_rgb565(r, p)
     }
 }
 /// Public native-color display, retaining the original product Display API.
@@ -87,8 +85,7 @@ impl<D> NativeDisplay<D> {
 impl<D: Display<Color = Native>> Legacy for NativeDisplay<D> {
     type Error = device_core::NativeWriteError<D::Error>;
     fn dimensions(&self) -> Dimensions {
-        let d = self.0.dimensions();
-        Dimensions::new(d.width, d.height)
+        self.0.dimensions()
     }
     fn write(&mut self, r: Rect, p: &[Rgb565]) -> Result<(), Self::Error> {
         if !r.fits(Legacy::dimensions(self)) || u32::try_from(p.len()).ok() != Some(r.area()) {
@@ -108,7 +105,7 @@ impl<D: Display<Color = Native>> Legacy for NativeDisplay<D> {
                     .map_err(|_| device_core::NativeWriteError::InvalidInput)?;
                 self.0
                     .write(
-                        moteframe_core::Rect::new(r.x + dx, r.y + dy, w, 1),
+                        Rect::new(r.x + dx, r.y + dy, w, 1),
                         &native[..chunk.len()],
                     )
                     .map_err(device_core::NativeWriteError::Display)?;
@@ -121,6 +118,7 @@ impl<D: Display<Color = Native>> Legacy for NativeDisplay<D> {
         r: Rect,
         p: &[Native],
     ) -> Result<(), device_core::NativeWriteError<Self::Error>> {
+        // Rebuilding the rectangle here emits a smaller routine with Cortex-M0 release LTO.
         self.0
             .write(moteframe_core::Rect::new(r.x, r.y, r.width, r.height), p)
             .map_err(|e| {
