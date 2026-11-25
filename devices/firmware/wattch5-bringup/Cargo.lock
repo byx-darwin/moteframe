@@ -275,6 +275,7 @@ version = "0.1.0"
 dependencies = [
  "device-core",
  "embedded-graphics",
+ "moteframe-ui",
 ]
 
 [[package]]
@@ -556,6 +557,14 @@ dependencies = [
 [[package]]
 name = "moteframe-input"
 version = "0.2.0"
+
+[[package]]
+name = "moteframe-ui"
+version = "0.2.0"
+dependencies = [
+ "embedded-graphics",
+ "moteframe-core",
+]
 
 [[package]]
 name = "nb"

@@ -1,31 +1,7 @@
-use device_core::{Dimensions, Rect};
+use device_core::Dimensions;
 use embedded_graphics::{
     geometry::Point, pixelcolor::Rgb565, prelude::Pixel, primitives::Rectangle,
 };
-
-/// Intersects signed graphics geometry with unsigned display bounds.
-///
-/// Returns `None` for an empty intersection, including zero-sized displays.
-/// Wide arithmetic supports all `i32` origins and `u32` extents without overflow.
-#[must_use]
-pub fn clip(area: Rectangle, dimensions: Dimensions) -> Option<Rect> {
-    let left = i64::from(area.top_left.x).max(0);
-    let top = i64::from(area.top_left.y).max(0);
-    let right =
-        (i64::from(area.top_left.x) + i64::from(area.size.width)).min(i64::from(dimensions.width));
-    let bottom = (i64::from(area.top_left.y) + i64::from(area.size.height))
-        .min(i64::from(dimensions.height));
-    if left >= right || top >= bottom {
-        return None;
-    }
-    // The nonempty intersection is bounded by u16 display dimensions.
-    Some(Rect::new(
-        u16::try_from(left).ok()?,
-        u16::try_from(top).ok()?,
-        u16::try_from(right - left).ok()?,
-        u16::try_from(bottom - top).ok()?,
-    ))
-}
 
 pub(crate) fn visible(point: Point, dimensions: Dimensions) -> Option<(u16, u16)> {
     let x = u16::try_from(point.x).ok()?;

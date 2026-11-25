@@ -8,6 +8,7 @@ publish.workspace = true
 [dependencies]
 device-core.workspace = true
 embedded-graphics.workspace = true
+moteframe-ui = { path = "../../../../crates/moteframe-ui", version = "=0.2.0", default-features = false, features = ["layout"] }
 
 [dev-dependencies]
 device-display.workspace = true

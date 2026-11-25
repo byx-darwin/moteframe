@@ -3,7 +3,10 @@ use core::convert::Infallible;
 use device_core::{Dimensions as DisplaySize, Display, Rect, Rgb565 as Packed};
 use embedded_graphics::{pixelcolor::Rgb565, prelude::*, primitives::Rectangle};
 
-use crate::geometry::{clip, contiguous_pixels, visible};
+use crate::{
+    clip,
+    geometry::{contiguous_pixels, visible},
+};
 
 /// Constant-memory union of invalidated rectangles for one logical display size.
 #[derive(Clone, Copy, Debug)]

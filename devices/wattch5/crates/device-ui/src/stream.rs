@@ -1,7 +1,10 @@
 use device_core::{Display, Rect, Rgb565 as Packed};
 use embedded_graphics::{pixelcolor::Rgb565, prelude::*, primitives::Rectangle};
 
-use crate::geometry::{clip, contiguous_pixels, visible};
+use crate::{
+    clip,
+    geometry::{contiguous_pixels, visible},
+};
 
 const RUN: u16 = 32;
 

@@ -70,7 +70,7 @@ fn test_should_clip_negative_and_extreme_rectangles_without_overflow() {
 
 #[test]
 fn test_should_layout_with_gap_and_keep_position_after_exhaustion() -> Result<(), LayoutError> {
-    let mut stack = Stack::new(Rect::new(2, 3, 10, 4), Axis::Horizontal, 1)?;
+    let mut stack: moteframe_ui::Stack = Stack::new(Rect::new(2, 3, 10, 4), Axis::Horizontal, 1)?;
     assert_eq!(stack.take(4)?, Rect::new(2, 3, 4, 4));
     assert_eq!(stack.take(6), Err(LayoutError::NoSpace));
     assert_eq!(stack.take(0), Err(LayoutError::ZeroExtent));

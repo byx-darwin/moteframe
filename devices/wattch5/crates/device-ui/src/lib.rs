@@ -4,14 +4,12 @@
 
 /// Shared drawing, font, text and image contracts from embedded-graphics.
 pub use embedded_graphics as graphics;
+pub use moteframe_ui::{Axis, LayoutError, Stack, clip};
 
 mod geometry;
-mod layout;
 mod refresh;
 mod stream;
 
-pub use geometry::clip;
-pub use layout::{Axis, LayoutError, Stack};
 pub use refresh::{
     CooperativeError, DamageError, DirtyRegion, RefreshError, Tile, damage_cooperative, repaint,
     repaint_cooperative,

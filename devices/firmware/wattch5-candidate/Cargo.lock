@@ -325,6 +325,7 @@ version = "0.1.0"
 dependencies = [
  "device-core",
  "embedded-graphics",
+ "moteframe-ui",
 ]
 
 [[package]]

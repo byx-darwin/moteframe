@@ -407,6 +407,7 @@ dependencies = [
  "device-core",
  "device-display",
  "embedded-graphics",
+ "moteframe-ui",
 ]
 
 [[package]]
@@ -703,6 +704,14 @@ dependencies = [
 name = "moteframe-storage"
 version = "0.2.0"
 dependencies = [
+ "moteframe-core",
+]
+
+[[package]]
+name = "moteframe-ui"
+version = "0.2.0"
+dependencies = [
+ "embedded-graphics",
  "moteframe-core",
 ]
 
