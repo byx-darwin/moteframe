@@ -4,6 +4,7 @@ from pathlib import Path
 import itertools
 import json
 import subprocess
+from check_memory import TARGET
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / 'target/ui-config-implementation/consumers'
@@ -84,7 +85,7 @@ def consumer(name, features, body, success=True, diagnostic=None, helper=False):
     (directory / 'Cargo.toml').write_text('[package]\nname="ui-consumer"\nversion="0.0.0"\nedition="2024"\n[workspace]\n[dependencies]\n' + deps + '\n')
     (directory / 'src/lib.rs').write_text(COMMON + body)
     subprocess.run(['cargo','generate-lockfile','--manifest-path',str(directory/'Cargo.toml'),'--offline'],check=True,capture_output=True,text=True)
-    result = subprocess.run(['cargo', 'build', '--locked', '--message-format=json', '--manifest-path', str(directory / 'Cargo.toml'), '--offline', '--target', 'thumbv6m-none-eabi', '--target-dir', str(OUT / 'build')], capture_output=True, text=True)
+    result = subprocess.run(['cargo', 'build', '--locked', '--message-format=json', '--manifest-path', str(directory / 'Cargo.toml'), '--offline', '--target', TARGET, '--target-dir', str(OUT / 'build')], capture_output=True, text=True)
     log = result.stdout + result.stderr
     (directory / 'result.log').write_text(log)
     try:

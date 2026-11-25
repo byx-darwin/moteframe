@@ -1,5 +1,5 @@
 PYTHON ?= python3
-TARGET ?= thumbv6m-none-eabi
+TARGET ?= thumbv8m.main-none-eabi
 
 .PHONY: check fmt format lint test doc boundary python-tests build example memory ui-config core-compat i2c-compat portable assets-input device-foundation ui-low-memory packages independent supply-chain secrets hooks-install hooks
 

@@ -18,7 +18,7 @@ class ContextMigrationTests(unittest.TestCase):
         self.module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(self.module)
         self.before = {'compiler': 'fixed', 'profile': 's', 'probe_sha256': 'probe',
-                       'linker_sha256': 'linker', 'target': 'thumbv6m-none-eabi',
+                       'linker_sha256': 'linker', 'target': 'thumbv8m.main-none-eabi',
                        'lock_sha256': 'old-lock', 'cargo_configuration': {
                            'manifests': {'Cargo.toml': 'old', 'core.toml': 'same'},
                            'nontransport_configs_sha256': []}}

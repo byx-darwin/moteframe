@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify real core consumers and fixed Cortex-M0 linked cost evidence offline."""
+"""Verify real core consumers and fixed Cortex-M33 linked cost evidence offline."""
 import argparse
 import hashlib
 import json
@@ -8,7 +8,7 @@ from pathlib import Path
 import re
 import subprocess
 
-from check_memory import read_layout, read_object
+from check_memory import TARGET, read_layout, read_object
 from check_ui_configuration import validate_build
 from check_ui_memory import linked_sections
 from check_build_context import validate_context
@@ -16,9 +16,8 @@ from check_build_context import validate_context
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / 'target/core-extensibility-implementation/consumers'
 REFERENCE = ROOT / 'scripts/core-compatibility-baseline.json'
-REFERENCE_SHA256 = '0ed2ec51e890d2f5ab71e6eb5cf9c6625a121057edf40bbe7f595dc6f73562c7'
+REFERENCE_SHA256 = 'e892813a7e6f8f5a16e4c92d6459ead9d1810d291b9682f74e05962faa817336'
 PROBE = ROOT / 'scripts/probes/core_compat.rs'
-TARGET = 'thumbv6m-none-eabi'
 REVISION = '8727225c79ffe8d993a1efc4419f42122ae365f1'
 PROFILE = 'opt-level=s;codegen-units=1;panic=abort;fat-LTO;debug=0;strip=none;overflow-checks=false;debug-assertions=false;incremental=false;fixed-linker;no-layout-statics'
 LEGACY = ('dedicated', 'shared')
@@ -128,7 +127,7 @@ def load_reference(path, expected_hash):
 def fixed_environment():
     """Refuse unrecorded compiler/profile overrides instead of publishing bad deltas."""
     blocked = {'RUSTFLAGS', 'CARGO_ENCODED_RUSTFLAGS', 'CARGO_BUILD_RUSTFLAGS',
-               'CARGO_TARGET_THUMBV6M_NONE_EABI_RUSTFLAGS', 'RUSTC', 'RUSTC_WRAPPER',
+               'RUSTC', 'RUSTC_WRAPPER',
                'RUSTC_WORKSPACE_WRAPPER', 'RUSTC_BOOTSTRAP', 'CARGO_BUILD_RUSTC',
                'CARGO_BUILD_RUSTC_WRAPPER', 'CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER',
                'CARGO_INCREMENTAL', 'CARGO_BUILD_INCREMENTAL'}
@@ -356,7 +355,7 @@ def main():
     host_libs = libraries(root, host, prefix / 'host-build')
     arm_libs = libraries(root, TARGET, prefix / 'arm-build')
     report = {'format_version': 1, 'environment': context(root), 'cases': {},
-              'limits': 'Fixed Cortex-M0 synthetic consumers and object-local frames, not complete firmware, worst call-chain/IRQ stack, hardware or power qualification.'}
+              'limits': 'Fixed Cortex-M33 synthetic consumers and object-local frames, not complete firmware, worst call-chain/IRQ stack, hardware or power qualification.'}
     for name in (LEGACY if args.baseline_root else MODES):
         report['cases'][name] = measure(name, host, host_libs, arm_libs, prefix / name)
     if args.baseline_root:

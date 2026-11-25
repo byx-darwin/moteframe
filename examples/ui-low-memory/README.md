@@ -19,7 +19,7 @@
 
 ## 从仓库根目录运行
 
-先安装仓库指定工具链及 `thumbv6m-none-eabi`。新环境可显式联网获取依赖一次：
+先安装仓库指定工具链及 `thumbv8m.main-none-eabi`。新环境可显式联网获取依赖一次：
 
 ```sh
 cargo fetch --manifest-path examples/ui-low-memory/Cargo.toml --locked
@@ -30,8 +30,8 @@ cargo fetch --manifest-path examples/ui-low-memory/Cargo.toml --locked
 ```sh
 cargo test --manifest-path examples/ui-low-memory/Cargo.toml --offline --locked
 cargo test --manifest-path examples/ui-low-memory/Cargo.toml --offline --locked --features ui-low-memory
-cargo build --manifest-path examples/ui-low-memory/Cargo.toml --release --target thumbv6m-none-eabi --offline --locked
-cargo build --manifest-path examples/ui-low-memory/Cargo.toml --release --target thumbv6m-none-eabi --offline --locked --features ui-low-memory
+cargo build --manifest-path examples/ui-low-memory/Cargo.toml --release --target thumbv8m.main-none-eabi --offline --locked
+cargo build --manifest-path examples/ui-low-memory/Cargo.toml --release --target thumbv8m.main-none-eabi --offline --locked --features ui-low-memory
 ```
 
 也可运行 `python3 scripts/check_ui_low_memory.py`。检查器校验独立 workspace、禁止发布、
@@ -59,8 +59,8 @@ session。内置场景为 Infallible；带资源读取等可失败场景可通�
 在**固件工程根目录**，完成上述 feature 和数组装配，并维护自己的锁文件后执行：
 
 ```sh
-cargo build --release --target thumbv6m-none-eabi --offline --locked
-cargo build --release --target thumbv6m-none-eabi --offline --locked --features ui-low-memory
+cargo build --release --target thumbv8m.main-none-eabi --offline --locked
+cargo build --release --target thumbv8m.main-none-eabi --offline --locked --features ui-low-memory
 ```
 
 Cargo feature 会在同一构建依赖图中合并：若其他依赖启用 UI 的 layout、damage 或

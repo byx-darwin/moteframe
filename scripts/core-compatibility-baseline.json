@@ -50,7 +50,7 @@
         ".bss": 0,
         ".data": 0,
         ".rodata": 16,
-        ".text": 1298
+        ".text": 1346
       }
     },
     "shared": {
@@ -88,7 +88,7 @@
         ".bss": 0,
         ".data": 0,
         ".rodata": 16,
-        ".text": 1644
+        ".text": 1622
       }
     }
   },
@@ -108,8 +108,8 @@
     "lock_sha256": "a2adbb726e5202257b953f260711876397dad932e2636ce557a43d928b9fb628",
     "probe_sha256": "9536c84159d06abee7dac7118584c15cef83e25dcc3cf80dbc5557b8fe11a431",
     "profile": "opt-level=s;codegen-units=1;panic=abort;fat-LTO;debug=0;strip=none;overflow-checks=false;debug-assertions=false;incremental=false;fixed-linker;no-layout-statics",
-    "target": "thumbv6m-none-eabi"
+    "target": "thumbv8m.main-none-eabi"
   },
   "format_version": 1,
-  "limits": "Fixed Cortex-M0 synthetic consumers and object-local frames, not complete firmware, worst call-chain/IRQ stack, hardware or power qualification."
+  "limits": "Fixed Cortex-M33 synthetic consumers and object-local frames, not complete firmware, worst call-chain/IRQ stack, hardware or power qualification."
 }

@@ -94,7 +94,8 @@ arrays), catalog and decoder buffers. Those rows are useful breakdowns and are
 locals; owner layout totals must not be added to those frames as extra RAM.
 The host PPM framebuffer is excluded from the framebuffer-free ARM consumer.
 
-Current Rust 1.96.0 / Cortex-M0 / size-optimized fat-LTO observations:
+Historical Rust 1.96.0 / Cortex-M0 / size-optimized fat-LTO observations.
+The maintained `make device-foundation` gate reports current Cortex-M33 measurements.
 
 | Measured item (bytes) | Default | Small memory |
 | --- | ---: | ---: |

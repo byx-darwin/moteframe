@@ -48,14 +48,13 @@ application + board adapters (separate from the portable crates)
 
 ## 架构范围与平台适配
 
-**MoteFrame 不限定 Cortex-M0。** 通用运行库没有绑定该架构的寄存器、指令或启动代码，
-通过接口隔离芯片与板级实现。当前固定的嵌入式验证目标为 Cortex-M0，适配范围与
-已验证范围如下：
+MoteFrame 通过通用接口与芯片和板级实现衔接。当前固定的嵌入式验证目标为
+FR8029D 使用的 Cortex-M33。
 
 | 平台范围 | 当前状态 |
 | --- | --- |
 | 主机环境 | 用于单元测试、离线绘图及工具检查 |
-| Cortex-M0（`thumbv6m-none-eabi`） | 已纳入交叉编译、Clippy、功能组合消费者及内存／链接探针；未做实机验证 |
+| Cortex-M33（`thumbv8m.main-none-eabi`） | 通用库交叉编译、Clippy、功能组合消费者和内存／链接探针，另有 FR8029D 裸机与 FreeRTOS 构建 |
 | 其他架构，例如 Cortex-M3／M4／M7、RISC-V | 可按通用接口开展适配，尚未纳入当前交叉编译或硬件验证范围 |
 
 框架维护通用接口和可复用实现，不预先为每种芯片补齐板级代码。具体适配放在使用
@@ -94,10 +93,8 @@ make build TARGET=thumbv7em-none-eabi
 make lint TARGET=thumbv7em-none-eabi
 ```
 
-这些是适配命令示例，不是该目标已经通过验证的声明。`TARGET` 目前只影响 Makefile
-中的目标库构建与目标 Clippy；`make memory`、`make ui-config`、`make core-compat`、`make i2c-compat` 的探针和消费者仍固定为
-`thumbv6m-none-eabi`。因此 `make check TARGET=...` 也不会把整套验收切换到新架构。
-新平台需另行补充验证，并重新核算内存、栈和硬件时序。
+`TARGET` 覆盖 Makefile 的目标库构建和 Clippy。功能组合消费者与资源探针固定使用
+`thumbv8m.main-none-eabi`。新平台需另行验证库和板级驱动，并重新核算内存、栈和硬件时序。
 
 ## 支持的颜色类型
 
@@ -180,13 +177,13 @@ let mut session = RefreshSession::new(&mut state, &mut scratch, RefreshSettings:
 Auto 采用实际容量；`Fixed(UI_PIXELS)` 可用，更大的 Fixed 返回 `WorkspaceTooSmall`。
 只调小刷新块上限不会缩小已声明的数组。
 
-从**本仓库根目录**运行两档主机验证与 Cortex-M0 库构建：
+从**本仓库根目录**运行两档主机验证与 Cortex-M33 库构建：
 
 ```sh
 cargo test --manifest-path examples/ui-low-memory/Cargo.toml --offline --locked
 cargo test --manifest-path examples/ui-low-memory/Cargo.toml --offline --locked --features ui-low-memory
-cargo build --manifest-path examples/ui-low-memory/Cargo.toml --release --target thumbv6m-none-eabi --offline --locked
-cargo build --manifest-path examples/ui-low-memory/Cargo.toml --release --target thumbv6m-none-eabi --offline --locked --features ui-low-memory
+cargo build --manifest-path examples/ui-low-memory/Cargo.toml --release --target thumbv8m.main-none-eabi --offline --locked
+cargo build --manifest-path examples/ui-low-memory/Cargo.toml --release --target thumbv8m.main-none-eabi --offline --locked --features ui-low-memory
 ```
 
 新环境先显式运行 `cargo fetch --manifest-path examples/ui-low-memory/Cargo.toml --locked`。
@@ -194,8 +191,8 @@ cargo build --manifest-path examples/ui-low-memory/Cargo.toml --release --target
 在**固件工程**加入同名应用 feature、真实数组与 RUN 选择后，则在固件根目录运行：
 
 ```sh
-cargo build --release --target thumbv6m-none-eabi --offline --locked
-cargo build --release --target thumbv6m-none-eabi --offline --locked --features ui-low-memory
+cargo build --release --target thumbv8m.main-none-eabi --offline --locked
+cargo build --release --target thumbv8m.main-none-eabi --offline --locked --features ui-low-memory
 ```
 
 Cargo feature 在同一依赖图中会合并；其他依赖开启的 UI 功能不会被本应用的
@@ -225,12 +222,12 @@ ble = ["dep:moteframe-ble"]
 ```
 
 这里的 `storage`／`ble` 是固件自己定义的开关。以下代码模块已使用对应 `cfg`，默认不启用；
-在**固件根目录**分别选择模块，以 Cortex-M0 为例：
+在**固件根目录**分别选择模块，以 Cortex-M33 为例：
 
 ```sh
-cargo build --release --target thumbv6m-none-eabi --features storage
-cargo build --release --target thumbv6m-none-eabi --features ble
-cargo build --release --target thumbv6m-none-eabi --features storage,ble
+cargo build --release --target thumbv8m.main-none-eabi --features storage
+cargo build --release --target thumbv8m.main-none-eabi --features ble
+cargo build --release --target thumbv8m.main-none-eabi --features storage,ble
 ```
 
 首次准备 Git 依赖与固件锁文件需要网络；准备后可附加 `--offline --locked`。
@@ -362,12 +359,12 @@ UI 继续使用现有 ResourceKey/Metadata/View；不可变目录与可变 reade
 
 ## 本地开发
 
-需要已安装的 Rust 1.96.0（rustfmt、Clippy、`thumbv6m-none-eabi` target）、Python 3.9+、Make。
+需要已安装的 Rust 1.96.0（rustfmt、Clippy、`thumbv8m.main-none-eabi` target）、Python 3.9+、Make。
 第一次准备依赖可显式运行 `cargo fetch --locked`。已有依赖后，回归命令均离线执行。
 
 ```sh
 make check           # 格式、主机/ARM lint、测试、文档与边界检查
-make build           # 默认 Cortex-M0 release 库，可通过 TARGET 覆盖
+make build           # 默认 Cortex-M33 release 库，可通过 TARGET 覆盖
 make example         # 生成 target/moteframe-demo.ppm，并检查实际像素
 make memory          # 宿主/ARM 颜色布局、对象代码及单函数栈帧
 make ui-config       # 功能组合、编译拒绝及配置内存／链接探针

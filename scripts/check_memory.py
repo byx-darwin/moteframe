@@ -11,7 +11,7 @@ import subprocess
 import tarfile
 import tempfile
 
-TARGET = "thumbv6m-none-eabi"
+TARGET = "thumbv8m.main-none-eabi"
 ROOT = Path(__file__).resolve().parents[1]
 NAMES = {"MF_" + name for name in [
     "PIXEL_RGB565", "PIXEL_RGB888", "PIXEL_GRAY8", "PIXEL_BINARY",

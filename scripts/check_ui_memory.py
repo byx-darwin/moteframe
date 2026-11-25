@@ -5,11 +5,10 @@ import json
 import os
 import struct
 import subprocess
-from check_memory import read_layout, read_object
+from check_memory import TARGET, read_layout, read_object
 from check_ui_configuration import effective
 
 ROOT = Path(__file__).resolve().parents[1]
-TARGET = 'thumbv6m-none-eabi'
 OUT = ROOT / 'target/ui-config-implementation/memory'
 BASE_NAMES = {'MF_'+n for n in ['SETTINGS_565','SETTINGS_888','SETTINGS_GRAY','SETTINGS_BINARY','STATE','CONTEXT','RESOURCE_KEY','RESOURCE_META','RESOURCE_VIEW','RUN_8','RUN_32','WORKSPACE']}
 COMBINATIONS = {'base': [], 'layout': ['layout'], 'refresh': ['refresh'], 'damage': ['damage'], 'pacing': ['frame-pacing'], 'default': ['layout','refresh','damage'], 'all': ['layout','refresh','damage','frame-pacing']}

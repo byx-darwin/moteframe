@@ -2,7 +2,7 @@
   "baseline_source_sha256": "a1bac9c7682f31c017dd67da2bdd8c13fbace4aa78fd352f462f40b5fc8ea2a7",
   "cases": {
     "legacy": {
-      "exercise_frame": 72,
+      "exercise_frame": 64,
       "host_outputs": [
         1347713899,
         2493535498,
@@ -17,12 +17,12 @@
         "I2C_OWNER": 40,
         "I2C_PIN": 16
       },
-      "max_local_frame": 72,
+      "max_local_frame": 64,
       "sections": {
         ".bss": 0,
         ".data": 0,
         ".rodata": 36,
-        ".text": 1190
+        ".text": 1194
       }
     }
   },
@@ -42,7 +42,7 @@
     "lock_sha256": "a2adbb726e5202257b953f260711876397dad932e2636ce557a43d928b9fb628",
     "probe_sha256": "d5a6f60f464ce6116407760a58a4e0d34452a8e424a9a98a7c51e3b169888a7a",
     "profile": "opt-level=s;codegen-units=1;panic=abort;fat-LTO;debug=0;strip=none;overflow-checks=false;debug-assertions=false;incremental=false;fixed-linker;no-layout-statics",
-    "target": "thumbv6m-none-eabi"
+    "target": "thumbv8m.main-none-eabi"
   },
-  "limits": "Fixed synthetic Cortex-M0 linked consumer and object-local frames, not full firmware, IRQ stack or hardware."
+  "limits": "Fixed synthetic Cortex-M33 linked consumer and object-local frames, not full firmware, IRQ stack or hardware."
 }

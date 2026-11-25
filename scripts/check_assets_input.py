@@ -124,7 +124,7 @@ def main():
                                 for name in ['moteframe-assets', 'moteframe-input']
                                 for path in sorted((ROOT / 'crates' / name / 'src').glob('*.rs'))},
               'cases': cases, 'off_without_new_libraries': off,
-              'limits': 'Executed synthetic consumers and Cortex-M0 local frames only; excludes full firmware, transport pools, IRQ stack and hardware behavior.'}
+              'limits': 'Executed synthetic consumers and Cortex-M33 local frames only; excludes full firmware, transport pools, IRQ stack and hardware behavior.'}
     (OUT / 'report.json').write_text(json.dumps(report, indent=2, sort_keys=True) + '\n')
     print('Assets/input compatibility and resource evidence: ' + str((OUT / 'report.json').relative_to(ROOT)))
 

@@ -29,9 +29,10 @@ Other color types currently have offline reference displays, not new physical
 panel drivers. Conversions, dithering, alpha and deferred panel commits remain
 outside this change.
 
-## Memory accounting
+## Historical memory accounting
 
 Measured with the pinned Rust 1.96.0 compiler on the host and thumbv6m-none-eabi.
+The maintained `make memory` probe now reports Cortex-M33 results.
 Both targets produced these pixel and buffer sizes, in bytes:
 
 | Color | One logical color | 32-color stream run | Two rows at width 240 |

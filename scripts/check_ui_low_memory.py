@@ -6,6 +6,7 @@ import os
 import re
 import subprocess
 import sys
+from check_memory import TARGET
 
 ROOT = Path(__file__).resolve().parents[1]
 APP = ROOT / "examples/ui-low-memory"
@@ -81,12 +82,12 @@ def main():
         hashes = json.loads(matches[0])
         if len(hashes) != 4:
             raise RuntimeError(f"{name}: expected four scene inputs")
-        run(["build", "--release", "--target", "thumbv6m-none-eabi", *features],
+        run(["build", "--release", "--target", TARGET, *features],
             f"{name}-arm-build.log")
         observations.append({"profile": name, "pixels": 8 if low_memory else 32,
                              "image_hashes": hashes, "host_tests": "passed",
                              "arm_build": "passed"})
-        print(f"{name}: host behavior tests and Cortex-M0 build passed")
+        print(f"{name}: host behavior tests and {TARGET} build passed")
     if observations[0]["image_hashes"] != observations[1]["image_hashes"]:
         raise RuntimeError("RAM profiles produced different final images")
     (OUT / "report.json").write_text(json.dumps(observations, indent=2) + "\n")

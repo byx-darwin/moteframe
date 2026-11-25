@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Execute the standalone composition and measure its actual Cortex-M0 owners."""
+"""Execute the standalone composition and measure its actual Cortex-M33 owners."""
 import hashlib
 import json
 import os
@@ -222,7 +222,7 @@ def main():
             'manifest_sha256':hashlib.sha256(MANIFEST.read_bytes()).hexdigest(),
             'lock_sha256':hashlib.sha256((APP/'Cargo.lock').read_bytes()).hexdigest(),
             'probe_sha256':hashlib.sha256(PROBE.read_bytes()).hexdigest(),'cases':cases,
-            'limits':'Synthetic host execution, Cortex-M0 link and local frames in this monomorphized consumer only. Owned layouts overlap nested fields and are not added to compiler frames. Excludes complete call chain, IRQ, pools, real clocks/radio and optical hardware behavior.'}
+            'limits':'Synthetic host execution, Cortex-M33 link and local frames in this monomorphized consumer only. Owned layouts overlap nested fields and are not added to compiler frames. Excludes complete call chain, IRQ, pools, real clocks/radio and optical hardware behavior.'}
     (OUT/'report.json').write_text(json.dumps(report,indent=2,sort_keys=True)+'\n')
     print('Default/small outputs identical; report: target/device-foundation/report.json')
 

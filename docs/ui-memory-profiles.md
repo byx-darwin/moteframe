@@ -101,8 +101,8 @@ examples/ui-low-memory/Cargo.toml --locked`：
 ```sh
 cargo test --manifest-path examples/ui-low-memory/Cargo.toml --offline --locked
 cargo test --manifest-path examples/ui-low-memory/Cargo.toml --offline --locked --features ui-low-memory
-cargo build --manifest-path examples/ui-low-memory/Cargo.toml --release --target thumbv6m-none-eabi --offline --locked
-cargo build --manifest-path examples/ui-low-memory/Cargo.toml --release --target thumbv6m-none-eabi --offline --locked --features ui-low-memory
+cargo build --manifest-path examples/ui-low-memory/Cargo.toml --release --target thumbv8m.main-none-eabi --offline --locked
+cargo build --manifest-path examples/ui-low-memory/Cargo.toml --release --target thumbv8m.main-none-eabi --offline --locked --features ui-low-memory
 python3 scripts/check_ui_low_memory.py
 ```
 
@@ -115,8 +115,8 @@ python3 scripts/check_ui_low_memory.py
 完成这些装配并维护固件自己的锁文件后，在固件根目录分别执行：
 
 ```sh
-cargo build --release --target thumbv6m-none-eabi --offline --locked
-cargo build --release --target thumbv6m-none-eabi --offline --locked --features ui-low-memory
+cargo build --release --target thumbv8m.main-none-eabi --offline --locked
+cargo build --release --target thumbv8m.main-none-eabi --offline --locked --features ui-low-memory
 ```
 
 Cargo feature 在同一构建依赖图中合并。若其他依赖启用 layout、damage 或 frame-pacing，

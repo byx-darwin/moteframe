@@ -8,7 +8,7 @@ publish.workspace = true
 [dependencies]
 ble-controller.workspace = true
 trouble-host.workspace = true
-# Cortex-M0 has no CAS; use the final board critical-section implementation.
+# Use the board critical-section implementation on targets without CAS.
 portable-atomic.workspace = true
 
 [dev-dependencies]

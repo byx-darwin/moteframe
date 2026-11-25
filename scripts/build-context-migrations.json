@@ -26,7 +26,7 @@
       },
       "name": "portable-storage-ble-2026-11-03-core",
       "reason": "Add two independent optional-by-dependency crates only; original compiler/profile/probes/configuration and every legacy resource/behavior/layout budget remain enforced.",
-      "reference_sha256": "0ed2ec51e890d2f5ab71e6eb5cf9c6625a121057edf40bbe7f595dc6f73562c7"
+      "reference_sha256": "e892813a7e6f8f5a16e4c92d6459ead9d1810d291b9682f74e05962faa817336"
     },
     {
       "after": {
@@ -53,7 +53,7 @@
       },
       "name": "portable-storage-ble-2026-11-03-i2c",
       "reason": "Add two independent optional-by-dependency crates only; original compiler/profile/probes/configuration and every legacy resource/behavior/layout budget remain enforced.",
-      "reference_sha256": "f9f7035dcb72ab303a0ea92320c6992c371539f6277445489e1caa14b36c0adc"
+      "reference_sha256": "fee9a7cda47764ef29ca5b05b5c068e317c18e9f102d386ee9ebd9b6098e077c"
     },
     {
       "after": {
@@ -82,7 +82,7 @@
       },
       "name": "portable-assets-input-2026-11-03-core",
       "reason": "Add independently selected assets/input with existing upstream dependencies only. Preserve frozen legacy measurements, profiles, compiler, probes and configuration; exact graph transition only.",
-      "reference_sha256": "0ed2ec51e890d2f5ab71e6eb5cf9c6625a121057edf40bbe7f595dc6f73562c7"
+      "reference_sha256": "e892813a7e6f8f5a16e4c92d6459ead9d1810d291b9682f74e05962faa817336"
     },
     {
       "after": {
@@ -111,7 +111,7 @@
       },
       "name": "portable-assets-input-2026-11-03-i2c",
       "reason": "Add independently selected assets/input with existing upstream dependencies only. Preserve frozen legacy measurements, profiles, compiler, probes and configuration; exact graph transition only.",
-      "reference_sha256": "f9f7035dcb72ab303a0ea92320c6992c371539f6277445489e1caa14b36c0adc"
+      "reference_sha256": "fee9a7cda47764ef29ca5b05b5c068e317c18e9f102d386ee9ebd9b6098e077c"
     }
   ]
 }

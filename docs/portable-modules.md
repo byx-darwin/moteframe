@@ -41,7 +41,7 @@ WriteSlot<T,N> 保存一次完整且已提交的接收写。槽满、超长或�
 仍限制为 min(N,512)。没有默认强制分配 512 字节、后台接收、片段拼装、配对或产品协议。
 详见 [BLE crate](../crates/moteframe-ble/README.md)。
 
-## 固定 Cortex-M0 消费者
+## 历史 Cortex-M0 固定消费者
 
 工具链固定，opt-level=s、fat LTO、单 codegen unit、panic=abort，八种运行输入产生
 可观察结果。owned/borrowed 存储结果相同，BLE 的容量／所有权变体结果也相同。
@@ -57,16 +57,14 @@ WriteSlot<T,N> 保存一次完整且已提交的接收写。槽满、超长或�
 对象不是静态 RAM，不能重复加到已包含它的局部帧。大槽对象多 24 B，但此消费者只读
 有效前缀，优化后局部帧相同，不代表任意应用扩容免费。借用也不总节省栈。数字包含
 模拟后端和消费逻辑，不是完整 BLE 栈／存储系统或最坏调用链／IRQ 栈成本。
-make portable 生成 target/portable-modules-delivery/resources/report.json。
+`make portable` 现使用 Cortex-M33，报告输出到 `target/portable-modules-delivery/resources/report.json`。
 
 ## 原成本基线与持续验证
 
-原 core/I²C 冻结 JSON、历史源码摘要和成本值保持原字节。新增成员改变根 manifest／lock，
-独立且固定摘要的 scripts/build-context-migrations.json 只放行逐项记录的原 reference hash
-及精确前后 Cargo 图。编译器、profile、probe、linker、非网络配置仍须完全一致；任意其他
-图变更和旧消费者资源正增量仍拒绝。迁移不是重新测量历史源码，也不是提高预算。
-BASELINE_MANIFESTS 与当前六 crate 指纹分开，context(root) 使用该 root 的锁文件。
-当前 dedicated/shared core 和 I²C legacy 的 Flash、静态 RAM、局部帧增量仍为 0。
+当前 Core 和 I²C 冻结参考由原始源码在 Cortex-M33 上重测。固定摘要的
+`scripts/build-context-migrations.json` 按参考文件和精确的前后 Cargo 图放行已记录的迁移。
+编译器、profile、probe、linker 和非网络配置仍须完全一致，其余图变更和旧消费者资源正增量会被拒绝。
+当前 dedicated/shared Core 和 I²C legacy 相对各自 Cortex-M33 基线的 Flash、静态 RAM、局部帧增量均为 0。
 
 [受维护的 RAM 示例](../examples/ui-low-memory/README.md) 每档分别运行 14 项测试和 ARM
 构建，检查真实数组、逐像素画面、写入次数、错误及待处理请求。内置场景 Infallible，

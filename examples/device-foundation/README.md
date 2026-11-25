@@ -15,7 +15,7 @@ cargo run --manifest-path examples/device-foundation/Cargo.toml --offline --lock
 
 The replay's parent output directory must already exist; `make device-foundation`
 creates its own output directory. It exports final PPM pixels, behavior counters,
-Cortex-M0 layouts, linked sections and local frame evidence under
+Cortex-M33 layouts, linked sections and local frame evidence under
 `target/device-foundation`. See [the complete integration report](../../docs/device-foundation.md).
 
 `UiMemory` owns UI state and pixels. `Demo` borrows it for a long-lived session and

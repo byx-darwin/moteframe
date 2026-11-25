@@ -82,11 +82,12 @@ scene 按 context 整屏区域布局，Tile::bounding_box 只用于当前裁剪�
 完整命令和结果存放在本地忽略目录 `target/ui-config-implementation/`。
 实际执行结果见末节；不把此覆盖清单当作执行结果。
 
-## ARM 内存和链接核算
+## 历史 Cortex-M0 内存和链接核算
 
 工具链固定 Rust 1.96.0、thumbv6m-none-eabi、opt-level=s、panic=abort，
 链接消费者使用 fat LTO。共七组消费者；各自实际消费启用能力，工作量不同，
 不是相同画面的性能对比，也不是“框架唯一占用”或产品固件大小。
+当前 `make ui-config` 使用 Cortex-M33 编译消费者和生成资源报告。
 
 尺寸单位为字节，RGB565 的逻辑颜色大小为 2；链接统计只计分配段。
 只读桶包含 `.ARM.exidx` 等只读分配段；测量用 layout 静态数组在最终链接前排除。

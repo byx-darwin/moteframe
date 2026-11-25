@@ -31,11 +31,11 @@ UI 的 ResourceKey/Metadata/View 保持原位置和 API，不复制到 assets。
 - 固定消费者验证 2／16 B scratch 输出等价，以及 1／4／16 槽的相同已消费输入序列；
   off 消费者带／不带新增库的链接段和输出一致。
 
-## Cortex-M0 固定消费者
+## 历史 Cortex-M0 固定消费者
 
 Rust 1.96，opt-level=s、fat LTO、单 codegen unit、panic=abort，与旧成本门禁相同。
 每个消费者在宿主执行八组输入，再读取真实 ARM 链接段、对象布局和局部栈帧。
-命令：`make assets-input`；原始报告：`target/assets-input/resources/report.json`。
+当前 `make assets-input` 使用 Cortex-M33，报告输出到 `target/assets-input/resources/report.json`。
 
 | 消费者 | 链接 Flash | 静态 data+bss | exercise 局部帧 |
 | --- | ---: | ---: | ---: |
@@ -58,9 +58,9 @@ Raster 为 16 B，Button／Touch 各 56 B。按键队列 1／4／16 槽的布局
 
 ## 原有门禁
 
-旧 core/I2C 冻结 JSON、源摘要与历史资源预算保持原字节。只追加从原基线图到当前
-八 crate 的精确 Cargo manifest/lock 迁移，继续拒绝其他编译器／profile／probe／配置
-变化及旧消费者资源正增量。新测量发现原布局解析器会混淆同名前缀 marker，已先用
+交付时只追加了从原基线图到八 crate 的精确 Cargo manifest/lock 迁移。当前 Core 和
+I²C 冻结参考使用同一原始源码在 Cortex-M33 上重测，继续拒绝未经核对的构建上下文
+变化及旧消费者资源正增量。当时的测量发现原布局解析器会混淆同名前缀 marker，已先用
 行为回归复现再修复；不改原布局或成本值。
 
 完整验证执行 `make check build supply-chain secrets hooks`，覆盖源文件／包边界、

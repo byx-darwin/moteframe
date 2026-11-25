@@ -65,11 +65,13 @@ ReadAt 保留 u32 容量／偏移。读取前验证整个范围；长度转换�
 明确空读取在 offset≤capacity 时成功且零 I/O，超过末尾即使空读也拒绝。
 仓库测试中的读源示例已按此边界更新；未新增生产存储后端。
 
-## 固定 ARM 消费者实测
+## 历史 Cortex-M0 消费者实测
 
 工具链 Rust 1.96.0，`thumbv6m-none-eabi`，opt-level=s、codegen-units=1、panic=abort，
 最终链接使用 fat LTO 与同一链接脚本。输入为运行时 seed，所有传输／错误／清理进入可观察校验值。
 以同一探针在原提交 `8727225c79ffe8d993a1efc4419f42122ae365f1` 和候选源码上重建旧路径。
+当前的 `make core-compat` 使用 Cortex-M33，沿用该原提交和固定工作量重测冻结基线。
+专用 SPI 和共享 SPI 的当前基线 Flash 分别为 1,362 B 和 1,638 B，局部帧为 160 B 和 176 B。
 
 字节数如下；Flash 为 text＋只读分配段＋data 初值，本组 data/bss 均为 0。
 
@@ -102,7 +104,8 @@ ReadAt 保留 u32 容量／偏移。读取前验证整个范围；长度转换�
 
 ## 栈空间优先时的接入选择
 
-对同一绘图、输入和传输／错误工作量，进一步比较所有权装配方式；三组实际执行的校验值一致：
+历史 Cortex-M0 实验用同一绘图、输入和传输／错误工作量比较了三种所有权装配方式，
+三组实际执行的校验值一致。
 
 | 装配方式 | Flash | exercise 局部帧 | 相对全部借用 |
 | --- | ---: | ---: | --- |
@@ -152,7 +155,8 @@ lock/probe/linker 摘要、全部 workspace manifest 与影响编译的 Cargo �
 可选重现原参考时，将上述原提交用 git archive 解出到一个本地忽略目录，再运行：
 
 ```sh
-python3 scripts/check_core_compatibility.py --baseline-root target/core-extensibility-implementation/baseline-source
+RUSTUP_TOOLCHAIN=1.96.0 python3 scripts/check_core_compatibility.py \
+  --baseline-root target/core-extensibility-implementation/baseline-source
 ```
 
 脚本核对原源码字节后重建报告，不覆盖冻结参考。若以后有意改变编译器或探针，应重新评审

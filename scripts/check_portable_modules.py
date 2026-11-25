@@ -105,7 +105,7 @@ def main():
     environment = context()
     environment['probe_sha256'] = hashlib.sha256(PROBE.read_bytes()).hexdigest()
     report = {'environment': environment, 'cases': cases,
-              'limits': 'Fixed Cortex-M0 consumers/local frames; excludes physical storage, BLE stack, firmware call-chain/IRQ stack and hardware qualification.'}
+              'limits': 'Fixed Cortex-M33 consumers/local frames; excludes physical storage, BLE stack, firmware call-chain/IRQ stack and hardware qualification.'}
     (OUT / 'report.json').write_text(json.dumps(report, indent=2, sort_keys=True) + '\n')
     print('Portable storage/BLE resource evidence: ' + str((OUT / 'report.json').relative_to(ROOT)))
 

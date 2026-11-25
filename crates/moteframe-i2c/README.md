@@ -32,6 +32,6 @@ delay callbacks must themselves have finite completion budgets. Software line
 observations do not qualify electrical timing, bus frequency or recovery.
 
 See the repository guide `docs/i2c-extensibility.md` for examples, ownership
-lifecycle, scope and fixed Cortex-M0 Flash/local-frame measurements.
+lifecycle, scope and fixed Cortex-M33 Flash/local-frame checks.
 
 Runtime: no_std, no allocation, unsafe forbidden. License: Apache-2.0; see LICENSE and NOTICE.

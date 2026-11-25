@@ -17,7 +17,7 @@ from check_build_context import validate_context
 OUT = ROOT / 'target/i2c-extensibility/consumers'
 PROBE = ROOT / 'scripts/probes/i2c_compat.rs'
 REFERENCE = ROOT / 'scripts/i2c-compatibility-baseline.json'
-REFERENCE_SHA256 = 'f9f7035dcb72ab303a0ea92320c6992c371539f6277445489e1caa14b36c0adc'
+REFERENCE_SHA256 = 'fee9a7cda47764ef29ca5b05b5c068e317c18e9f102d386ee9ebd9b6098e077c'
 SOURCE_SHA256 = 'a1bac9c7682f31c017dd67da2bdd8c13fbace4aa78fd352f462f40b5fc8ea2a7'
 SOURCE = ROOT / 'crates/moteframe-i2c/src/lib.rs'
 MODES = {'legacy': 'exercise', 'normal': 'exercise_normal', 'checked': 'exercise_checked', 'recover': 'exercise_recover'}
@@ -142,7 +142,7 @@ def main():
     hlibs, alibs = build(host, OUT / 'host-build'), build(TARGET, OUT / 'arm-build')
     report = {'environment': environment, 'cases': {name: measure(name, host, hlibs, alibs) for name in (['legacy'] if args.record_baseline else MODES)},
               'baseline_source_sha256': SOURCE_SHA256, 'full_probe_sha256': digest(PROBE),
-              'limits': 'Fixed synthetic Cortex-M0 linked consumer and object-local frames, not full firmware, IRQ stack or hardware.'}
+              'limits': 'Fixed synthetic Cortex-M33 linked consumer and object-local frames, not full firmware, IRQ stack or hardware.'}
     if not args.record_baseline:
         reference = load_reference()
         report['legacy_deltas'] = compare(reference, report)

@@ -28,7 +28,7 @@ class CompatibilityEvidence(unittest.TestCase):
             'sections': {'.text': 120, '.rodata': 16, '.data': 0, '.bss': 0},
             'exercise_frame': 32, 'max_local_frame': 40,
         }
-        env = {'compiler': 'locked', 'target': 'thumbv6m-none-eabi',
+        env = {'compiler': 'locked', 'target': 'thumbv8m.main-none-eabi',
                'profile': 'fixed', 'lock_sha256': 'a', 'probe_sha256': 'b'}
         self.reference = {'format_version': 1, 'environment': env,
                           'cases': {name: copy.deepcopy(self.case) for name in MODULE.LEGACY},
@@ -44,7 +44,7 @@ class CompatibilityEvidence(unittest.TestCase):
     def test_cargo_compiler_aliases_target_flags_and_incremental_overrides_are_rejected(self):
         for key in ['CARGO_BUILD_RUSTC', 'CARGO_BUILD_RUSTC_WRAPPER',
                     'CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER', 'CARGO_INCREMENTAL',
-                    'CARGO_BUILD_INCREMENTAL', 'CARGO_TARGET_THUMBV6M_NONE_EABI_RUSTFLAGS',
+                    'CARGO_BUILD_INCREMENTAL', 'CARGO_TARGET_THUMBV8M_MAIN_NONE_EABI_RUSTFLAGS',
                     'CARGO_TARGET_AARCH64_APPLE_DARWIN_RUSTFLAGS',
                     'CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS']:
             with self.subTest(key=key), patch.dict(os.environ, {key: 'unrecorded'}, clear=True):
@@ -161,7 +161,7 @@ class CompatibilityEvidence(unittest.TestCase):
             self.assertEqual(manifest_changed, MODULE.build_configuration(root))
             for text in ['build={rustflags=["-Copt-level=0"]}\n',
                          '[env]\nRUSTFLAGS="-Copt-level=0"\n',
-                         '[target.thumbv6m-none-eabi]\nrustflags=["-Copt-level=0"]\n']:
+                         '[target."thumbv8m.main-none-eabi"]\nrustflags=["-Copt-level=0"]\n']:
                 config.write_text(text)
                 with self.subTest(config=text):
                     self.assertNotEqual(manifest_changed, MODULE.build_configuration(root))

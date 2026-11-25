@@ -12,15 +12,15 @@ jobs:
         run: rustup show
       - name: Fetch locked dependencies before offline verification
         run: cargo fetch --locked
-      - name: Portable host and Cortex-M0 regression
+      - name: Portable host and Cortex-M33 regression
         run: make check build
 
   device-regression:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Prepare Cortex-M33 target
-        run: rustup target add thumbv8m.main-none-eabi
+      - name: Prepare pinned Rust toolchain
+        run: rustup show
       - name: Check FR8029D host and bare-metal build
         run: |
           cargo test --locked --manifest-path devices/firmware/fr8029d-bringup/Cargo.toml --features ble-gatt-probe

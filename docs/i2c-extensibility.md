@@ -61,13 +61,17 @@ SCL 等待，无 stretch 时 64+18n 次 delay；严格路径再增加两个 STOP
 - 支持 owned 或显式借用对象；自定义 Line 的引用转发由调用方提供，没有新增 blanket impl。
 - 原 new 在失败时仍消费并 drop 参数，保持兼容。取回后由设备工程显式调查/修复并重建。
 
-## 固定 Cortex-M0 实测
+## 持续验证与历史 Cortex-M0 实测
 
-make i2c-compat 已纳入 make check 和现有 CI。固定 Rust 工具链、thumbv6m-none-eabi、
-opt-level=s、fat LTO、单 codegen unit、panic=abort；记录锁文件、构建配置、workload
-和原始源码摘要。正常门禁校验冻结 JSON 完整摘要，不自动重写基线。
+`make i2c-compat` 已纳入 `make check` 和 CI。当前目标为 Cortex-M33
+（`thumbv8m.main-none-eabi`），沿用原始 I²C 源码和固定工作量重测冻结基线。
+旧接口的当前基线为 1,230 B Flash、0 B 静态 RAM、64 B 局部帧。
+门禁固定 Rust 工具链、opt-level=s、fat LTO、单 codegen unit 和 panic=abort，
+核对锁文件、构建配置、工作量、原始源码及冻结 JSON 的完整摘要。
 非默认编译器、Cargo 包装器别名、目标专用 rustflags、增量和 profile 覆盖会被拒绝，
 避免实际构建已变却仍报零增量。
+
+下表是原 Cortex-M0 验收的历史测量。
 
 | 消费者 | 链接 Flash | 静态 data+bss | exercise 局部帧 |
 | --- | ---: | ---: | ---: |
