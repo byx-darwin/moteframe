@@ -72,20 +72,8 @@ SCRIPTS = {
     "scripts/check_assets_input.py", "scripts/probes/assets_input.rs", "scripts/tests/test_assets_input.py",
 }
 BINARY_SUFFIXES = {".bin", ".lib", ".a", ".elf", ".hex", ".pdf", ".doc", ".docx", ".png", ".jpg", ".zip", ".7z", ".rar", ".pem", ".key"}
-DEVICE_FIRMWARE = {"fr8029d-bringup", "wattch5-bringup", "wattch5-candidate", "wattch5-product"}
+DEVICE_FIRMWARE = {"fr8029d-bringup"}
 SHARED_DEVICE_CRATES = {"ble-controller", "ble-host-trouble"}
-WATTCH5_CRATES = {
-    "device-application",
-    "device-assets", "device-ble", "device-config-store", "device-configuration",
-    "device-connection", "device-content", "device-content-service", "device-core",
-    "device-health", "device-health-service", "device-history-service",
-    "device-history-store", "device-job-store", "device-maintenance",
-    "device-maintenance-service", "device-models", "device-moteframe", "device-motion",
-    "device-motion-service", "device-object-service", "device-object-store",
-    "device-property-store", "device-protocol", "device-runtime", "device-services",
-    "device-storage", "device-time-store", "device-ui",
-    "device-wellness", "device-wellness-service",
-}
 DEVICE_ARTIFACT_DIRS = {
     "target", "output", "__pycache__", "evidence", "vendor", "vendor-sdk",
     "captures", "dumps", "stock", "secrets", "backups",
@@ -98,16 +86,6 @@ DEVICE_TOP_LEVEL = {
 DEVICE_SOURCE_SUFFIXES = {
     ".rs", ".toml", ".lock", ".s", ".py", ".c", ".h", ".md", ".json", ".tcl",
     ".x", ".cfg", ".mjs", ".html", ".txt", ".css", ".ld", ".js", ".sh",
-}
-# Synthetic parser and store test inputs, never production assets or images.
-DEVICE_FIXTURES = {
-    "devices/firmware/wattch5-product/tests/fixtures/legacy_health_metadata.bin",
-    "devices/firmware/wattch5-bringup/profiles/legacy-lab-test.profile",
-    "devices/drivers/resource-archive/tests/fixtures/absent-distance.zlib",
-} | {
-    f"devices/drivers/resource-archive/tests/fixtures/{name}.{extension}"
-    for name in ("distance512", "dynamic", "fixed", "multiple", "stored")
-    for extension in ("raw", "zlib")
 }
 DEVICE_BUILD_DIRS = {"devices/target"} | {f"devices/firmware/{name}/target" for name in DEVICE_FIRMWARE}
 
@@ -122,7 +100,7 @@ def contained(path, root):
 
 
 def allowed_device_source(relative):
-    if relative in DEVICE_TOP_LEVEL or relative in DEVICE_FIXTURES:
+    if relative in DEVICE_TOP_LEVEL:
         return True
     path = Path(relative)
     parts = path.parts
@@ -133,16 +111,7 @@ def allowed_device_source(relative):
     section, package = parts[1:3]
     allowed_package = (
         (section == "crates" and package in SHARED_DEVICE_CRATES)
-        or (
-            section == "wattch5" and package == "crates"
-            and len(parts) >= 5 and parts[3] in WATTCH5_CRATES
-        )
         or (section == "firmware" and package in DEVICE_FIRMWARE)
-        or (section == "boards" and package == "wattch5")
-        or (section == "platforms" and package == "syd881x")
-        or (section == "drivers" and package in {"bitbang-i2c", "display", "resource-archive", "spi-nor", "touch"})
-        or (section == "examples" and package in {"wattch5-ui", "wattch5-retro-ui", "wattch5-parity-ui"})
-        or (section == "designs" and package == "wattch5-retro-parity")
     )
     return allowed_package and (
         path.suffix.lower() in DEVICE_SOURCE_SUFFIXES or path.name in {"LICENSE", "NOTICE", "COPYING"}

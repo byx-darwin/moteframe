@@ -3,7 +3,7 @@
 MoteFrame began as a selected extraction of owner-controlled portable Rust
 components. Its portable crates carry regression tests and use the MoteFrame
 package and import names. The separate [device workspace](devices/README.md)
-includes the selected FR8029D and Wattch 5 first-party device source.
+includes the selected FR8029D first-party device source.
 
 The owner authorized publication of the selected first-party code under
 Apache-2.0. The canonical attribution notice is NOTICE and the full license is
@@ -11,8 +11,7 @@ LICENSE. The portable crates carry their own copies. Redistribution, including
 commercial products, follows Apache-2.0 section 4. No additional license
 restriction is imposed by this provenance document.
 
-Dependencies and redistributed fonts retain their original licenses. See the
-[font notice](devices/designs/wattch5-retro-parity/FONT-NOTICE.md) and the
+Dependencies retain their original licenses. See the
 [upstream FreeRTOS-Kernel license](https://github.com/FreeRTOS/FreeRTOS-Kernel/blob/V11.2.0/LICENSE.md)
 for the separately fetched optional kernel.
 

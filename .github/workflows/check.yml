@@ -29,7 +29,3 @@ jobs:
         run: |
           git clone --depth 1 --branch V11.2.0 https://github.com/FreeRTOS/FreeRTOS-Kernel.git devices/target/fr8029d-freertos/kernel
           cargo build --locked --release --manifest-path devices/firmware/fr8029d-bringup/Cargo.toml --target thumbv8m.main-none-eabi --features ble-gatt-freertos,ble-gatt-xip --bin fr8029d-ble-adv
-      - name: Check Wattch 5 host and Cortex-M0 build
-        run: |
-          cargo test --locked --manifest-path devices/firmware/wattch5-product/Cargo.toml --features runtime-trouble,wattch5-source,legacy-health
-          cargo build --locked --release --manifest-path devices/firmware/wattch5-product/Cargo.toml --target thumbv6m-none-eabi --features arm-image,wattch5-source --bin wattch5-product

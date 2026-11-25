@@ -3,31 +3,11 @@
 version = 4
 
 [[package]]
-name = "autocfg"
-version = "1.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
-
-[[package]]
-name = "az"
-version = "1.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7b7e4c2464d97fe331d41de9d5db0def0a96f4d823b8b32a2efd503578988973"
-
-[[package]]
 name = "ble-controller"
 version = "0.1.0"
 dependencies = [
  "bt-hci",
  "embedded-io",
-]
-
-[[package]]
-name = "ble-controller-syd881x"
-version = "0.1.0"
-dependencies = [
- "ble-controller",
- "syd881x-radio",
 ]
 
 [[package]]
@@ -40,24 +20,6 @@ dependencies = [
  "embassy-time",
  "portable-atomic",
  "trouble-host",
-]
-
-[[package]]
-name = "ble-syd881x"
-version = "0.1.0"
-dependencies = [
- "device-ble",
-]
-
-[[package]]
-name = "board-syd8810"
-version = "0.1.0"
-dependencies = [
- "device-core",
- "device-display",
- "embedded-hal 1.0.0",
- "syd881x-hal",
- "syd881x-runtime",
 ]
 
 [[package]]
@@ -111,317 +73,6 @@ name = "critical-section"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "790eea4361631c5e7d22598ecd5723ff611904e3344ce8720784c93e3d83d40b"
-
-[[package]]
-name = "device-application"
-version = "0.1.0"
-dependencies = [
- "device-configuration",
- "device-connection",
- "device-content",
- "device-content-service",
- "device-health",
- "device-health-service",
- "device-history-service",
- "device-maintenance",
- "device-maintenance-service",
- "device-models",
- "device-motion",
- "device-motion-service",
- "device-object-service",
- "device-protocol",
- "device-services",
- "device-storage",
- "device-wellness",
- "device-wellness-service",
-]
-
-[[package]]
-name = "device-assets"
-version = "0.1.0"
-dependencies = [
- "device-core",
- "device-spi-nor",
- "embedded-hal 1.0.0",
-]
-
-[[package]]
-name = "device-bitbang-i2c"
-version = "0.1.0"
-dependencies = [
- "device-core",
-]
-
-[[package]]
-name = "device-ble"
-version = "0.1.0"
-
-[[package]]
-name = "device-config-store"
-version = "0.1.0"
-dependencies = [
- "device-configuration",
- "device-protocol",
- "device-services",
- "device-storage",
-]
-
-[[package]]
-name = "device-configuration"
-version = "0.1.0"
-dependencies = [
- "device-models",
- "device-motion",
- "device-protocol",
- "device-wellness",
-]
-
-[[package]]
-name = "device-connection"
-version = "0.1.0"
-dependencies = [
- "device-protocol",
- "device-services",
-]
-
-[[package]]
-name = "device-content"
-version = "0.1.0"
-dependencies = [
- "device-models",
-]
-
-[[package]]
-name = "device-content-service"
-version = "0.1.0"
-dependencies = [
- "device-connection",
- "device-content",
- "device-protocol",
- "device-services",
-]
-
-[[package]]
-name = "device-core"
-version = "0.1.0"
-dependencies = [
- "embedded-graphics-core",
- "embedded-hal 1.0.0",
- "moteframe-core",
-]
-
-[[package]]
-name = "device-display"
-version = "0.1.0"
-dependencies = [
- "device-core",
- "embedded-hal 1.0.0",
-]
-
-[[package]]
-name = "device-health"
-version = "0.1.0"
-
-[[package]]
-name = "device-health-service"
-version = "0.1.0"
-dependencies = [
- "device-health",
- "device-protocol",
- "device-services",
-]
-
-[[package]]
-name = "device-history-service"
-version = "0.1.0"
-dependencies = [
- "device-protocol",
- "device-services",
- "device-storage",
-]
-
-[[package]]
-name = "device-history-store"
-version = "0.1.0"
-dependencies = [
- "device-history-service",
- "device-protocol",
- "device-services",
- "device-storage",
-]
-
-[[package]]
-name = "device-job-store"
-version = "0.1.0"
-dependencies = [
- "device-maintenance-service",
- "device-protocol",
- "device-services",
- "device-storage",
-]
-
-[[package]]
-name = "device-maintenance"
-version = "0.1.0"
-
-[[package]]
-name = "device-maintenance-service"
-version = "0.1.0"
-dependencies = [
- "device-connection",
- "device-maintenance",
- "device-protocol",
- "device-services",
-]
-
-[[package]]
-name = "device-models"
-version = "0.1.0"
-dependencies = [
- "device-protocol",
-]
-
-[[package]]
-name = "device-moteframe"
-version = "0.1.0"
-dependencies = [
- "device-core",
- "device-display",
- "embedded-graphics",
- "embedded-hal 1.0.0",
- "moteframe-core",
- "moteframe-display",
- "moteframe-storage",
-]
-
-[[package]]
-name = "device-motion"
-version = "0.1.0"
-
-[[package]]
-name = "device-motion-service"
-version = "0.1.0"
-dependencies = [
- "device-motion",
- "device-protocol",
- "device-services",
-]
-
-[[package]]
-name = "device-object-service"
-version = "0.1.0"
-dependencies = [
- "device-protocol",
- "device-services",
- "device-storage",
-]
-
-[[package]]
-name = "device-object-store"
-version = "0.1.0"
-dependencies = [
- "device-object-service",
- "device-protocol",
- "device-services",
- "device-storage",
-]
-
-[[package]]
-name = "device-property-store"
-version = "0.1.0"
-dependencies = [
- "device-configuration",
- "device-connection",
- "device-content",
- "device-protocol",
- "device-services",
- "device-storage",
-]
-
-[[package]]
-name = "device-protocol"
-version = "0.1.0"
-
-[[package]]
-name = "device-resource-archive"
-version = "0.1.0"
-dependencies = [
- "device-core",
- "device-history-service",
- "device-history-store",
- "device-storage",
-]
-
-[[package]]
-name = "device-runtime"
-version = "0.1.0"
-dependencies = [
- "device-connection",
- "device-protocol",
- "device-services",
-]
-
-[[package]]
-name = "device-services"
-version = "0.1.0"
-dependencies = [
- "device-protocol",
-]
-
-[[package]]
-name = "device-spi-nor"
-version = "0.1.0"
-dependencies = [
- "device-core",
- "device-storage",
- "embedded-hal 1.0.0",
-]
-
-[[package]]
-name = "device-storage"
-version = "0.1.0"
-dependencies = [
- "device-protocol",
-]
-
-[[package]]
-name = "device-time-store"
-version = "0.1.0"
-dependencies = [
- "device-protocol",
- "device-services",
- "device-storage",
-]
-
-[[package]]
-name = "device-touch"
-version = "0.1.0"
-dependencies = [
- "device-core",
-]
-
-[[package]]
-name = "device-ui"
-version = "0.1.0"
-dependencies = [
- "device-core",
- "device-display",
- "embedded-graphics",
- "moteframe-ui",
-]
-
-[[package]]
-name = "device-wellness"
-version = "0.1.0"
-
-[[package]]
-name = "device-wellness-service"
-version = "0.1.0"
-dependencies = [
- "device-protocol",
- "device-services",
- "device-wellness",
-]
 
 [[package]]
 name = "document-features"
@@ -495,29 +146,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "embedded-graphics"
-version = "0.8.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4e8da660bb0c829b34a56a965490597f82a55e767b91f9543be80ce8ccb416fe"
-dependencies = [
- "az",
- "byteorder",
- "embedded-graphics-core",
- "float-cmp",
- "micromath",
-]
-
-[[package]]
-name = "embedded-graphics-core"
-version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "95743bef3ff70fcba3930246c4e6872882bbea0dcc6da2ca860112e0cd4bd09f"
-dependencies = [
- "az",
- "byteorder",
-]
-
-[[package]]
 name = "embedded-hal"
 version = "0.2.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -555,15 +183,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2564b9f813c544241430e147d8bc454815ef9ac998878d30cc3055449f7fd4c0"
 dependencies = [
  "embedded-io",
-]
-
-[[package]]
-name = "float-cmp"
-version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "98de4bbd547a563b716d8dfa9aad1cb19bfab00f4fa09a6a4ed21dbcf44ce9c4"
-dependencies = [
- "num-traits",
 ]
 
 [[package]]
@@ -671,51 +290,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "micromath"
-version = "2.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c3c8dda44ff03a2f238717214da50f65d5a53b45cd213a7370424ffdb6fae815"
-
-[[package]]
-name = "moteframe-assets"
-version = "0.2.0"
-dependencies = [
- "embedded-graphics-core",
- "moteframe-core",
-]
-
-[[package]]
-name = "moteframe-core"
-version = "0.2.0"
-dependencies = [
- "embedded-hal 1.0.0",
-]
-
-[[package]]
-name = "moteframe-display"
-version = "0.2.0"
-dependencies = [
- "embedded-graphics-core",
- "embedded-hal 1.0.0",
- "moteframe-core",
-]
-
-[[package]]
-name = "moteframe-storage"
-version = "0.2.0"
-dependencies = [
- "moteframe-core",
-]
-
-[[package]]
-name = "moteframe-ui"
-version = "0.2.0"
-dependencies = [
- "embedded-graphics",
- "moteframe-core",
-]
-
-[[package]]
 name = "nb"
 version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -729,15 +303,6 @@ name = "nb"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8d5439c4ad607c3c23abf66de8c8bf57ba8adcd1f129e699851a6e43935d339d"
-
-[[package]]
-name = "num-traits"
-version = "0.2.19"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "071dfc062690e90b734c0b2273ce72ad0ffa95f0c74596bc250dcfd960262841"
-dependencies = [
- "autocfg",
-]
 
 [[package]]
 name = "pin-project-lite"
@@ -794,29 +359,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "syd881x-hal"
-version = "0.1.0"
-dependencies = [
- "device-bitbang-i2c",
- "device-core",
- "embedded-hal 1.0.0",
- "syd881x-radio",
-]
-
-[[package]]
-name = "syd881x-radio"
-version = "0.1.0"
-
-[[package]]
-name = "syd881x-runtime"
-version = "0.1.0"
-dependencies = [
- "critical-section",
- "embassy-time-driver",
- "syd881x-hal",
-]
-
-[[package]]
 name = "syn"
 version = "2.0.119"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -861,33 +403,6 @@ name = "void"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6a02e4885ed3bc0f2de90ea6dd45ebcbb66dacffe03547fadbb0eeae2770887d"
-
-[[package]]
-name = "wattch5-parity-ui-demo"
-version = "0.1.0"
-dependencies = [
- "device-core",
- "device-ui",
- "moteframe-assets",
- "moteframe-core",
-]
-
-[[package]]
-name = "wattch5-retro-ui-demo"
-version = "0.1.0"
-dependencies = [
- "device-core",
- "device-ui",
-]
-
-[[package]]
-name = "wattch5-ui-demo"
-version = "0.1.0"
-dependencies = [
- "device-assets",
- "device-core",
- "device-ui",
-]
 
 [[package]]
 name = "zerocopy"

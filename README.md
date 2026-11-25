@@ -44,7 +44,7 @@ application + board adapters (separate from the portable crates)
 原机素材及厂商资源不在通用库范围内。通用存储／BLE 模块由固件按依赖选择，不要求 UI 使用它们。
 显示初始化序列和电气时序由调用方提供。
 
-本仓库的独立 [设备工程](devices/README.md) 提供 FR8029D 和 Wattch 5 的构建入口。设备工程直接引用这里的通用 crates。
+本仓库的独立设备工程提供 FR8029D 的裸机和 FreeRTOS 构建入口，直接引用这里的通用 crates。[设备工程](devices/README.md)
 
 ## 架构范围与平台适配
 
