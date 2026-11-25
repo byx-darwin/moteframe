@@ -32,7 +32,7 @@ pub trait ExitMailbox {
     fn commit(&mut self, magic: u32);
 }
 
-#[derive(Debug, Default)]
+#[derive(Default)]
 struct Cause {
     path: [u8; 8],
     data: [u8; 16],
@@ -192,9 +192,13 @@ impl Cause {
 }
 
 /// Fixed 128-byte little-endian record; no text, allocator, restart or error suppression.
-#[derive(Debug)]
 pub struct ExitDiagnostic {
     bytes: [u8; 128],
+}
+impl core::fmt::Debug for ExitDiagnostic {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("ExitDiagnostic").finish_non_exhaustive()
+    }
 }
 impl ExitDiagnostic {
     /// Publishes a complete numeric record without moving or suppressing the result.
