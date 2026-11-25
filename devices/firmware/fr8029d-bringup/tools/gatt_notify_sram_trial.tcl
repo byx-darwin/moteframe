@@ -1,5 +1,6 @@
 # Source the output of gatt_notify_memory.py pack before this file.
 # Run one temporary trial with: run_notify_trial 240 /path/to/stock-prefix.bin
+# Pass 2 as the third argument to observe a write/Notify after reconnect too.
 
 proc notify_core_check {} {
     if {[read_memory 0xe000ed00 32 1] != 0x410fd210 ||
@@ -77,12 +78,15 @@ proc notify_check_scheduler {} {
     }
 }
 
-proc notify_wait_for_tx {seconds} {
+proc notify_wait_for_tx {seconds {sessions 1}} {
     set last {}
     set deadline [expr {[clock seconds] + $seconds}]
     set observed 0
     set abandoned 0
     set disconnects 0
+    set confirmed 0
+    set last_write 0
+    set last_disconnect -1
     while {[clock seconds] < $deadline} {
         set d [notify_diag]
         set phase [lindex $d 0]
@@ -105,7 +109,8 @@ proc notify_wait_for_tx {seconds} {
             set last $key
         }
         if {$phase & 0x80000000} {error "GATT stopped with diagnostics $d"}
-        if {!$observed && [lindex $d 1] >= 1 && [lindex $d 4] == 9 && [lindex $d 16] == 27} {
+        if {$phase == 4 && !$observed && [lindex $d 1] > $last_write &&
+            $disconnects > $last_disconnect && [lindex $d 4] == 9 && [lindex $d 16] == 27} {
             set expected {0xb 0x0 0x4 0x0 0x1b 0x9 0x0}
             foreach word [lrange $d 2 3] {
                 for {set shift 0} {$shift < 32} {incr shift 8} {
@@ -119,7 +124,11 @@ proc notify_wait_for_tx {seconds} {
         }
         if {$observed && $outstanding == $abandoned} {
             echo "TX_QUEUE_CONFIRMED $d"
-            return
+            incr confirmed
+            if {$confirmed == $sessions} {return}
+            set last_write [lindex $d 1]
+            set last_disconnect $disconnects
+            set observed 0
         }
         sleep 10
     }
@@ -147,10 +156,11 @@ proc restore_notify_stock {prefix_path} {
     echo "STOCK_RESTORED FLASH_PREFIX_BYTES=12288"
 }
 
-proc run_notify_trial {seconds {prefix_path {}}} {
+proc run_notify_trial {seconds {prefix_path {}} {sessions 1}} {
     if {![string is integer -strict $seconds] || $seconds <= 0} {
         error "Provide a positive trial duration in seconds"
     }
+    if {$sessions ni {1 2}} {error "Provide one or two expected sessions"}
     notify_core_check
     if {[read_memory 0xe000ed08 32 1] != 0x10002000} {
         error "Expected starting firmware to be stock"
@@ -198,9 +208,14 @@ proc run_notify_trial {seconds {prefix_path {}}} {
 
         notify_wait_advertising
         notify_check_scheduler
-        notify_wait_for_tx $seconds
-        # Keep the link open for viewing the notification on the phone.
-        sleep 30000
+        notify_wait_for_tx $seconds $sessions
+        if {$sessions == 1} {
+            # Keep the link open for viewing the notification on the phone.
+            sleep 30000
+        } else {
+            # Give the Mac time to finish its final disconnect before reset.
+            sleep 1000
+        }
     } explanation]
     if {$resumed} {
         set sample_failure [catch {

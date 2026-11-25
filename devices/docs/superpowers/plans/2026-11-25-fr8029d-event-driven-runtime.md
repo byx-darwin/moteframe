@@ -6,9 +6,9 @@ FR8029D 是首个 BLE 实机目标。现有裸机和 FreeRTOS GATT 样例作为�
 
 ## 1. Mac BLE 验收基线
 
-- [ ] 在 `scripts/ble_connect.swift` 增加 FR8029D 裸机和 FreeRTOS 探针选择，保留原 `RUST-LINK` 入口与其协议。
-- [ ] Mac 按探针名和 GATT UUID 确认识别，订阅成功后发送同一组 8 字节测试数据。只有写入确认和同一特征值的回显都通过才判成功。输出可区分扫描、连接、服务发现、订阅、写入和回显故障的日志。
-- [ ] 从 SRAM 分别运行 `FR29-GAT2` 和 `FR29-RTOS`，记录 Mac、J-Link 和原厂恢复结果。手机历史记录保留为对照。
+- [x] 在 `scripts/ble_connect.swift` 增加 FR8029D 裸机和 FreeRTOS 探针选择，保留原 `RUST-LINK` 入口与其协议。
+- [x] Mac 脚本按探针名和 GATT UUID 确认识别。两版都在首次订阅后写入 `FR29NT75`，重连并重新订阅后写入 `FR29RC02`。写入确认和匹配回显均收到才判定该轮通过。日志按阶段记录故障。
+- [ ] 从 SRAM 分别运行 `FR29-GAT2` 和 `FR29-RTOS`，完成 Mac 连接、带响应写入、Notify 和重连后复测。首次实机验收停在扫描阶段。J-Link 确认两版进入广播阶段，并在试验结束后复位到原厂应用，核对了 Flash 前 12 KiB。手机历史记录保留为对照。
 
 ## 2. FR8029D 共用硬件唤醒
 

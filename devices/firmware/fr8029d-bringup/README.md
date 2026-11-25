@@ -193,6 +193,21 @@ GATT 探针名为 `FR29-GAT2`。Notify 版使用以 `A0` 结尾的测试地址�
 
 Notify 版 SRAM 镜像含代码与初始化数据共 58984 字节，比读写版增加 904 字节。栈预留 22272 字节，此轮手机订阅、写入和通知期间的栈填充值覆盖深度为 11464 字节。实验未写 Flash。
 
+### Mac 蓝牙验收
+
+从仓库根目录运行对应 SRAM 探针的验收命令。J-Link 端按下节方法装载探针，将 `run_notify_trial` 的第三个参数设为 `2`，观察两次独立连接的写入和发送完成。板端观察窗口要覆盖 Mac 的总超时。
+
+```sh
+swift devices/scripts/ble_connect.swift FR29-GAT2 --timeout 60
+swift devices/scripts/ble_connect.swift FR29-RTOS --timeout 60
+```
+
+两版都先以 Write Request 发送 `FR29NT75`。首次连接收到写确认和匹配的 Notify 后，Mac 主动断开，再次扫描并连接同一探针，重新订阅后发送 `FR29RC02`。两轮都通过并正常断开时，脚本输出 `reconnect_verified`，退出码为 0。失败时的 JSON 日志包含 `phase`，便于核对扫描、连接、服务发现、订阅、写确认或回显。扫描超时日志还记录收到的广播数和匹配名称的次数。
+
+省略探针名仍使用 `RUST-LINK` 的原有 UUID、写入和独立 Notify 响应。可用 `swift -D BLE_CONNECT_TESTS devices/scripts/ble_connect.swift` 离线核对参数和回显判定。
+
+2026-11-25 实机复测中，两版 SRAM 探针均进入广播阶段，FreeRTOS 版的调度时钟也在推进。Mac 验收脚本分别收到 225 和 238 条广播回调，目标名匹配均为零。被动复测同时查看广播名称和系统缓存名称，两版仍无匹配。原厂固件作为对照，在 45 秒内通过系统缓存名称匹配到两次 `802x_Ble_Periphreal`。Mac 的连接、写入、Notify 和重连仍待实机验收。各轮试验结束后均已复位回原厂应用，Flash 前 12 KiB 读回一致。
+
 ## FreeRTOS 单应用任务
 
 `ble-gatt-freertos` 把同一个 Rust BLE 循环放进一个静态分配的 FreeRTOS 任务。内核另有一个 Idle 任务。射频、Host 和 GATT 继续使用 Rust 实现，RTOS 部分使用上游 FreeRTOS-Kernel V11.2.0 的 Cortex-M33 端口和 C 内核。BLE 任务栈为 16 KiB，Idle 栈为 1 KiB，中断主栈为 1792 B。内核使用静态分配。

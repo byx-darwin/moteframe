@@ -1,120 +1,373 @@
-// Lab central: connect only to RUST-LINK; no pairing or product data writes.
+// Mac central for the RUST-LINK and FR8029D bench probes.
 import Foundation
 import CoreBluetooth
 
 func emit(_ value: [String: Any]) {
     if let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]),
        let line = String(data: data, encoding: .utf8) {
-        print(line); fflush(stdout)
+        print(line)
+        fflush(stdout)
     }
 }
 
-let permission = CBManager.authorization
-emit(["event": "authorization", "value": permission.rawValue])
-if permission != .allowedAlways {
-    emit(["event": "blocked", "reason": "Bluetooth authorization is required"]); exit(3)
+func hex(_ data: Data) -> String {
+    data.map { String(format: "%02x", $0) }.joined()
+}
+
+struct WriteExchange {
+    let request: Data
+    let expectedReply: Data
+    private(set) var writeAcknowledged = false
+    private(set) var replyVerified = false
+
+    var isVerified: Bool { writeAcknowledged && replyVerified }
+
+    mutating func acknowledge() {
+        writeAcknowledged = true
+    }
+
+    mutating func observe(_ bytes: Data) -> Bool {
+        let matches = bytes == expectedReply
+        if matches { replyVerified = true }
+        return matches
+    }
+}
+
+enum ProbeProfile: String {
+    case rustLink = "RUST-LINK"
+    case bare = "FR29-GAT2"
+    case freeRTOS = "FR29-RTOS"
+
+    var rounds: Int { self == .rustLink ? 1 : 2 }
+
+    var serviceID: CBUUID {
+        CBUUID(string: self == .rustLink ? "7B76CDA0-7B53-4E09-A85C-0135939A0001"
+                                         : "2f8029d0-7ff7-48b0-a64e-d6ebc735b251")
+    }
+
+    var characteristicID: CBUUID {
+        CBUUID(string: self == .rustLink ? "7B76CDA0-7B53-4E09-A85C-0135939A0002"
+                                         : "2f8029d1-7ff7-48b0-a64e-d6ebc735b251")
+    }
+
+    func exchange(round: Int) -> WriteExchange {
+        if self == .rustLink {
+            return WriteExchange(
+                request: Data([0x52, 0x55, 0x53, 0x54, 1, 0x23, 0x45, 0x67]),
+                expectedReply: Data([0xa5, 0x5a, 0x10, 0x20, 0x30, 0x40, 0x50, 0x60])
+            )
+        }
+        let request = Data((round == 1 ? "FR29NT75" : "FR29RC02").utf8)
+        return WriteExchange(request: request, expectedReply: request)
+    }
+}
+
+struct ProbeOptions {
+    static let usage = "Usage: ble_connect.swift [RUST-LINK|FR29-GAT2|FR29-RTOS] [--timeout SECONDS]"
+    let probe: ProbeProfile
+    let timeout: Int
+
+    static func parse(_ arguments: [String]) -> Self? {
+        var remaining = arguments
+        var timeout = 60
+        if let index = remaining.firstIndex(of: "--timeout") {
+            guard remaining.count > index + 1,
+                  let seconds = Int(remaining[index + 1]),
+                  (1...300).contains(seconds) else { return nil }
+            timeout = seconds
+            remaining.removeSubrange(index...index + 1)
+        }
+        guard remaining.count <= 1,
+              let probe = ProbeProfile(rawValue: remaining.first ?? "RUST-LINK")
+        else { return nil }
+        return Self(probe: probe, timeout: timeout)
+    }
 }
 
 final class LinkCentral: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
-    var central: CBCentralManager!
-    var target: CBPeripheral?
-    var connected = false
-    var discovered = false
-    let serviceID = CBUUID(string: "7B76CDA0-7B53-4E09-A85C-0135939A0001")
-    let characteristicID = CBUUID(string: "7B76CDA0-7B53-4E09-A85C-0135939A0002")
-    let testInput = Data([0x52,0x55,0x53,0x54,1,0x23,0x45,0x67])
-    let testReply = Data([0xa5,0x5a,0x10,0x20,0x30,0x40,0x50,0x60])
-    var writeAcknowledged = false
-    var replyVerified = false
-    var finished = false
-    func finishIfVerified() {
-        guard !finished, writeAcknowledged, replyVerified else { return }
-        finished = true
-        emit(["event": "bidirectional_verified", "write_acknowledged": true,
-              "distinct_notification_verified": true])
-        if let target { central.cancelPeripheralConnection(target) }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { exit(0) }
+    private enum Phase: String {
+        case bluetooth, scan, connect
+        case serviceDiscovery = "service_discovery"
+        case characteristicDiscovery = "characteristic_discovery"
+        case subscription
+        case writeResponse = "write_response"
+        case notification, verified, disconnect, finished
+
+        var awaitingExchange: Bool { self == .writeResponse || self == .notification }
     }
-    override init() {
+
+    private let probe: ProbeProfile
+    private let serviceID: CBUUID
+    private let characteristicID: CBUUID
+    private var central: CBCentralManager!
+    private var target: CBPeripheral?
+    private var identity: UUID?
+    private var phase: Phase = .bluetooth
+    private var round = 1
+    private var completedRounds = 0
+    private var exchange: WriteExchange
+    private var connected = false
+    private var discovered = false
+    private var advertisementReports = 0
+    private var matchingAdvertisements = 0
+
+    init(options: ProbeOptions) {
+        probe = options.probe
+        serviceID = probe.serviceID
+        characteristicID = probe.characteristicID
+        exchange = probe.exchange(round: 1)
         super.init()
         central = CBCentralManager(delegate: self, queue: .main,
             options: [CBCentralManagerOptionShowPowerAlertKey: false])
-        DispatchQueue.main.asyncAfter(deadline: .now() + 60) { [self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + .seconds(options.timeout)) { [self] in
+            fail("timeout")
+        }
+    }
+
+    private func report(_ event: String, _ fields: [String: Any] = [:]) {
+        var value = fields
+        value["event"] = event
+        value["name"] = probe.rawValue
+        value["round"] = round
+        emit(value)
+    }
+
+    private func scan() {
+        phase = .scan
+        report("scan_started")
+        central.scanForPeripherals(
+            withServices: nil,
+            options: [CBCentralManagerScanOptionAllowDuplicatesKey: true]
+        )
+    }
+
+    private func finish(_ status: Int32, reason: String) {
+        guard phase != .finished else { return }
+        report("complete", ["phase": phase.rawValue, "reason": reason,
+                            "connected": connected, "services_discovered": discovered,
+                            "write_acknowledged": exchange.writeAcknowledged,
+                            "reply_verified": exchange.replyVerified,
+                            "completed_rounds": completedRounds,
+                            "advertisement_reports": advertisementReports,
+                            "matching_advertisements": matchingAdvertisements])
+        phase = .finished
+        if central.state == .poweredOn {
             central.stopScan()
             if let target { central.cancelPeripheralConnection(target) }
-            emit(["event": "complete", "connected": connected, "services_discovered": discovered,
-                  "write_acknowledged": writeAcknowledged, "reply_verified": replyVerified])
-            exit(writeAcknowledged && replyVerified ? 0 : 4)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { exit(status) }
+    }
+
+    private func fail(_ reason: String) {
+        guard phase != .finished else { return }
+        report("failed", ["phase": phase.rawValue, "reason": reason])
+        finish(4, reason: reason)
+    }
+
+    private func finishExchange(_ peripheral: CBPeripheral) {
+        guard phase.awaitingExchange, exchange.isVerified else { return }
+        completedRounds += 1
+        let verification = probe == .rustLink ? "distinct_notification_verified" : "echo_notification_verified"
+        report("bidirectional_verified", ["write_acknowledged": true, verification: true])
+
+        if probe == .rustLink {
+            finish(0, reason: "verified")
+            return
+        }
+        phase = .verified
+        // Let the bench SWD observer sample the transmission before disconnecting.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [self] in
+            guard phase == .verified, peripheral === target else { return }
+            phase = .disconnect
+            report("disconnect_requested")
+            central.cancelPeripheralConnection(peripheral)
         }
     }
+
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
         emit(["event": "bluetooth_state", "value": central.state.rawValue])
-        if central.state == .poweredOn { central.scanForPeripherals(withServices: nil) }
+        if central.state == .poweredOn && phase == .bluetooth {
+            scan()
+        } else if central.state == .unauthorized || central.state == .unsupported
+                    || (phase != .bluetooth && central.state != .poweredOn) {
+            fail("Bluetooth state \(central.state.rawValue)")
+        }
     }
+
     func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral,
                         advertisementData: [String: Any], rssi RSSI: NSNumber) {
-        guard target == nil,
-              advertisementData[CBAdvertisementDataLocalNameKey] as? String == "RUST-LINK",
-              advertisementData[CBAdvertisementDataIsConnectable] as? Bool == true else { return }
-        target = peripheral; peripheral.delegate = self; central.stopScan()
-        emit(["event": "connect_attempt", "name": "RUST-LINK", "rssi": RSSI])
+        guard phase == .scan else { return }
+        advertisementReports += 1
+        guard advertisementData[CBAdvertisementDataLocalNameKey] as? String == probe.rawValue
+        else { return }
+        matchingAdvertisements += 1
+        guard advertisementData[CBAdvertisementDataIsConnectable] as? Bool == true,
+              identity == nil || identity == peripheral.identifier else { return }
+
+        identity = peripheral.identifier
+        target = peripheral
+        peripheral.delegate = self
+        central.stopScan()
+        phase = .connect
+        report("connect_attempt", ["rssi": RSSI])
         central.connect(peripheral)
     }
+
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
-        connected = true; emit(["event": "connected", "name": "RUST-LINK"])
-        peripheral.discoverServices(nil)
+        guard peripheral === target, phase == .connect else { return }
+        connected = true
+        phase = .serviceDiscovery
+        report("connected")
+        peripheral.discoverServices(probe == .rustLink ? nil : [serviceID])
     }
+
     func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral,
                         error: Error?) {
-        emit(["event": "connect_failed", "error": error?.localizedDescription ?? "unknown"])
+        guard peripheral === target, phase == .connect else { return }
+        let reason = error?.localizedDescription ?? "connection failed"
+        report("connect_failed", ["error": reason])
+        fail(reason)
     }
+
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral,
                         error: Error?) {
-        emit(["event": "disconnected", "error": error?.localizedDescription ?? "none"])
-    }
-    func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
-        discovered = error == nil && !(peripheral.services ?? []).isEmpty
-        emit(["event": "services", "count": peripheral.services?.count ?? 0,
-              "error": error?.localizedDescription ?? "none"])
-        if let service = peripheral.services?.first(where: { $0.uuid == serviceID }) {
-            peripheral.discoverCharacteristics([characteristicID], for: service)
+        guard peripheral === target else { return }
+        report("disconnected", ["error": error?.localizedDescription ?? "none"])
+        guard phase != .finished else { return }
+        guard phase == .disconnect, error == nil else {
+            fail(error?.localizedDescription ?? "unexpected disconnect")
+            return
+        }
+        target = nil
+        if completedRounds == probe.rounds {
+            report("reconnect_verified", ["completed_rounds": completedRounds])
+            finish(0, reason: "verified")
+        } else {
+            round += 1
+            exchange = probe.exchange(round: round)
+            scan()
         }
     }
+
+    func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
+        guard peripheral === target, phase == .serviceDiscovery else { return }
+        let services = peripheral.services ?? []
+        discovered = error == nil && !services.isEmpty
+        report("services", ["count": services.count, "error": error?.localizedDescription ?? "none"])
+        guard error == nil, let service = services.first(where: { $0.uuid == serviceID }) else {
+            fail(error?.localizedDescription ?? "expected service not found")
+            return
+        }
+        phase = .characteristicDiscovery
+        peripheral.discoverCharacteristics([characteristicID], for: service)
+    }
+
     func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService,
                     error: Error?) {
-        emit(["event": "characteristics", "count": service.characteristics?.count ?? 0,
-              "error": error?.localizedDescription ?? "none"])
-        if let characteristic = service.characteristics?.first(where: { $0.uuid == characteristicID }) {
-            peripheral.setNotifyValue(true, for: characteristic)
+        guard peripheral === target, phase == .characteristicDiscovery, service.uuid == serviceID
+        else { return }
+        let characteristics = service.characteristics ?? []
+        report("characteristics", ["count": characteristics.count,
+                                   "error": error?.localizedDescription ?? "none"])
+        guard error == nil,
+              let characteristic = characteristics.first(where: { $0.uuid == characteristicID })
+        else {
+            fail(error?.localizedDescription ?? "expected characteristic not found")
+            return
         }
+        guard probe == .rustLink || characteristic.properties.contains([.write, .notify]) else {
+            fail("expected characteristic does not support Write Request and Notify")
+            return
+        }
+        phase = .subscription
+        peripheral.setNotifyValue(true, for: characteristic)
     }
+
+    private func isCurrent(_ peripheral: CBPeripheral, _ characteristic: CBCharacteristic) -> Bool {
+        peripheral === target && characteristic.uuid == characteristicID
+            && characteristic.service?.uuid == serviceID
+    }
+
     func peripheral(_ peripheral: CBPeripheral, didUpdateNotificationStateFor characteristic: CBCharacteristic,
                     error: Error?) {
-        guard characteristic.uuid == characteristicID else { return }
-        emit(["event": "subscription", "enabled": characteristic.isNotifying,
-              "error": error?.localizedDescription ?? "none"])
-        if error == nil && characteristic.isNotifying {
-            peripheral.writeValue(testInput, for: characteristic, type: .withResponse)
-            emit(["event": "write_sent", "hex": testInput.map { String(format: "%02x", $0) }.joined()])
+        guard phase == .subscription, isCurrent(peripheral, characteristic) else { return }
+        report("subscription", ["enabled": characteristic.isNotifying,
+                                "error": error?.localizedDescription ?? "none"])
+        guard error == nil, characteristic.isNotifying else {
+            fail(error?.localizedDescription ?? "Notify subscription was not enabled")
+            return
         }
+        phase = .writeResponse
+        report("write_sent", ["hex": hex(exchange.request)])
+        peripheral.writeValue(exchange.request, for: characteristic, type: .withResponse)
     }
+
     func peripheral(_ peripheral: CBPeripheral, didWriteValueFor characteristic: CBCharacteristic,
                     error: Error?) {
-        guard characteristic.uuid == characteristicID else { return }
-        writeAcknowledged = error == nil
-        emit(["event": "write_ack", "success": writeAcknowledged,
-              "error": error?.localizedDescription ?? "none"])
-        finishIfVerified()
+        guard phase == .writeResponse, isCurrent(peripheral, characteristic) else { return }
+        report("write_ack", ["success": error == nil, "error": error?.localizedDescription ?? "none"])
+        if let error { fail(error.localizedDescription); return }
+        exchange.acknowledge()
+        phase = .notification
+        finishExchange(peripheral)
     }
+
     func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic,
                     error: Error?) {
-        guard characteristic.uuid == characteristicID else { return }
-        replyVerified = error == nil && characteristic.value == testReply
-        emit(["event": "notification", "matches_expected": replyVerified,
-              "hex": (characteristic.value ?? Data()).map { String(format: "%02x", $0) }.joined(),
-              "error": error?.localizedDescription ?? "none"])
-        finishIfVerified()
+        guard phase.awaitingExchange, isCurrent(peripheral, characteristic) else { return }
+        if let error { fail(error.localizedDescription); return }
+        let bytes = characteristic.value ?? Data()
+        let matches = exchange.observe(bytes)
+        report("notification", ["matches_expected": matches, "hex": hex(bytes), "error": "none"])
+        finishExchange(peripheral)
     }
 }
-let client = LinkCentral()
+
+#if BLE_CONNECT_TESTS
+func testProbeExchanges() {
+    precondition(ProbeOptions.parse([])?.probe == .rustLink)
+    precondition(ProbeOptions.parse(["FR29-GAT2", "--timeout", "12"])?.timeout == 12)
+    precondition(ProbeOptions.parse(["802x_Ble_Periphreal"]) == nil)
+    precondition(ProbeOptions.parse(["--timeout", "0"]) == nil)
+
+    var legacy = ProbeProfile.rustLink.exchange(round: 1)
+    precondition(legacy.request == Data([0x52, 0x55, 0x53, 0x54, 1, 0x23, 0x45, 0x67]))
+    legacy.acknowledge()
+    precondition(!legacy.observe(legacy.request) && !legacy.isVerified)
+    precondition(legacy.observe(Data([0xa5, 0x5a, 0x10, 0x20, 0x30, 0x40, 0x50, 0x60])))
+    precondition(legacy.isVerified)
+
+    for probe in [ProbeProfile.bare, .freeRTOS] {
+        var first = probe.exchange(round: 1)
+        var second = probe.exchange(round: 2)
+        precondition(probe.rounds == 2 && first.request.count == 8 && second.request.count == 8)
+        precondition(first.request != second.request)
+        precondition(first.observe(first.request) && !first.isVerified)
+        first.acknowledge()
+        precondition(first.isVerified)
+        second.acknowledge()
+        precondition(!second.observe(first.request) && !second.isVerified)
+        precondition(second.observe(second.request) && second.isVerified)
+    }
+}
+testProbeExchanges()
+print("BLE probe exchanges passed")
+#else
+let arguments = Array(CommandLine.arguments.dropFirst())
+if arguments == ["--help"] {
+    print(ProbeOptions.usage)
+    exit(0)
+}
+guard let options = ProbeOptions.parse(arguments) else {
+    fputs(ProbeOptions.usage + "\n", stderr)
+    exit(2)
+}
+let permission = CBManager.authorization
+emit(["event": "authorization", "value": permission.rawValue])
+guard permission == .allowedAlways else {
+    emit(["event": "blocked", "reason": "Bluetooth authorization is required"])
+    exit(3)
+}
+let client = LinkCentral(options: options)
 RunLoop.main.run()
+#endif
