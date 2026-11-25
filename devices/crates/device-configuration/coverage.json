@@ -1,0 +1,798 @@
+{
+  "authority": "Implementation coverage, not user freeze or hardware availability",
+  "original_properties": 62,
+  "original_objects": 15,
+  "implemented_original_routes": 61,
+  "external_remaining_routes": 16,
+  "entries": [
+    {
+      "id": "01.P0001",
+      "kind": "property",
+      "baseline_status": "完整合同",
+      "feature": "time",
+      "owner": "device-configuration",
+      "validation": "typed-codec/delegated DTO validator implemented",
+      "hardware_available": false,
+      "frozen_bytes_preserved": true
+    },
+    {
+      "id": "03.P0001",
+      "kind": "property",
+      "baseline_status": "待冻结",
+      "feature": "profile",
+      "owner": "device-models",
+      "validation": "typed-codec/delegated DTO validator implemented",
+      "hardware_available": false,
+      "frozen_bytes_preserved": false
+    },
+    {
+      "id": "03.P0002",
+      "kind": "property",
+      "baseline_status": "待冻结",
+      "feature": "profile",
+      "owner": "device-models",
+      "validation": "typed-codec/delegated DTO validator implemented",
+      "hardware_available": false,
+      "frozen_bytes_preserved": false
+    },
+    {
+      "id": "20.P0001",
+      "kind": "property",
+      "baseline_status": "完整合同",
+      "feature": "health-policy",
+      "owner": "device-configuration",
+      "validation": "typed-codec/delegated DTO validator implemented",
+      "hardware_available": false,
+      "frozen_bytes_preserved": true
+    },
+    {
+      "id": "20.P0002",
+      "kind": "property",
+      "baseline_status": "待冻结",
+      "feature": "health-policy",
+      "owner": "device-configuration",
+      "validation": "typed-codec/delegated DTO validator implemented",
+      "hardware_available": false,
+      "frozen_bytes_preserved": false
+    },
+    {
+      "id": "20.P0003",
+      "kind": "property",
+      "baseline_status": "待冻结",
+      "feature": "health-policy",
+      "owner": "device-configuration",
+      "validation": "typed-codec/delegated DTO validator implemented",
+      "hardware_available": false,
+      "frozen_bytes_preserved": false
+    },
+    {
+      "id": "21.P0001",
+      "kind": "property",
+      "baseline_status": "完整合同",
+      "feature": "sleep",
+      "owner": "device-motion/device-models",
+      "validation": "typed-codec/delegated DTO validator implemented",
+      "hardware_available": false,
+      "frozen_bytes_preserved": true
+    },
+    {
+      "id": "21.P0002",
+      "kind": "property",
+      "baseline_status": "待冻结",
+      "feature": "sleep",
+      "owner": "device-motion/device-models",
+      "validation": "typed-codec/delegated DTO validator implemented",
+      "hardware_available": false,
+      "frozen_bytes_preserved": false
+    },
+    {
+      "id": "22.P0001",
+      "kind": "property",
+      "baseline_status": "待冻结",
+      "feature": "sport",
+      "owner": "device-motion/device-configuration",
+      "validation": "typed-codec/delegated DTO validator implemented",
+      "hardware_available": false,
+      "frozen_bytes_preserved": false
+    },
+    {
+      "id": "22.P0002",
+      "kind": "property",
+      "baseline_status": "待冻结",
+      "feature": "sport + health-policy",
+      "owner": "device-motion/device-configuration",
+      "validation": "typed-codec/delegated DTO validator implemented",
+      "hardware_available": false,
+      "frozen_bytes_preserved": false
+    },
+    {
+      "id": "23.P0001",
+      "kind": "property",
+      "baseline_status": "待冻结",
+      "feature": "activity",
+      "owner": "device-motion/device-configuration",
+      "validation": "typed-codec/delegated DTO validator implemented",
+      "hardware_available": false,
+      "frozen_bytes_preserved": false
+    },
+    {
+      "id": "25.P0002",
+      "kind": "property",
+      "baseline_status": "待冻结",
+      "feature": "health-policy",
+      "owner": "device-configuration",
+      "validation": "typed-codec/delegated DTO validator implemented",
+      "hardware_available": false,
+      "frozen_bytes_preserved": false
+    },
+    {
+      "id": "25.P0003",
+      "kind": "property",
+      "baseline_status": "完整合同",
+      "feature": "health-policy",
+      "owner": "device-configuration",
+      "validation": "typed-codec/delegated DTO validator implemented",
+      "hardware_available": false,
+      "frozen_bytes_preserved": true
+    },
+    {
+      "id": "26.P0001",
+      "kind": "property",
+      "baseline_status": "待冻结",
+      "feature": "health-policy",
+      "owner": "device-configuration",
+      "validation": "typed-codec/delegated DTO validator implemented",
+      "hardware_available": false,
+      "frozen_bytes_preserved": false
+    },
+    {
+      "id": "26.P0002",
+      "kind": "property",
+      "baseline_status": "待冻结",
+      "feature": "health-policy",
+      "owner": "device-configuration",
+      "validation": "typed-codec/delegated DTO validator implemented",
+      "hardware_available": false,
+      "frozen_bytes_preserved": false
+    },
+    {
+      "id": "27.P0001",
+      "kind": "property",
+      "baseline_status": "待冻结",
+      "feature": "health-policy",
+      "owner": "device-configuration",
+      "validation": "typed-codec/delegated DTO validator implemented",
+      "hardware_available": false,
+      "frozen_bytes_preserved": false
+    },
+    {
+      "id": "28.P0001",
+      "kind": "property",
+      "baseline_status": "待冻结",
+      "feature": "health-policy",
+      "owner": "device-configuration",
+      "validation": "typed-codec/delegated DTO validator implemented",
+      "hardware_available": false,
+      "frozen_bytes_preserved": false
+    },
+    {
+      "id": "28.P0002",
+      "kind": "property",
+      "baseline_status": "待冻结",
+      "feature": "health-policy",
+      "owner": "device-configuration",
+      "validation": "typed-codec/delegated DTO validator implemented",
+      "hardware_available": false,
+      "frozen_bytes_preserved": false
+    },
+    {
+      "id": "28.P0003",
+      "kind": "property",
+      "baseline_status": "完整合同",
+      "feature": "health-policy",
+      "owner": "device-configuration",
+      "validation": "typed-codec/delegated DTO validator implemented",
+      "hardware_available": false,
+      "frozen_bytes_preserved": true
+    },
+    {
+      "id": "2A.P0001",
+      "kind": "property",
+      "baseline_status": "待冻结",
+      "feature": "health-policy",
+      "owner": "device-configuration",
+      "validation": "typed-codec/delegated DTO validator implemented",
+      "hardware_available": false,
+      "frozen_bytes_preserved": false
+    },
+    {
+      "id": "2A.P0002",
+      "kind": "property",
+      "baseline_status": "待冻结",
+      "feature": "health-policy",
+      "owner": "device-configuration",
+      "validation": "typed-codec/delegated DTO validator implemented",
+      "hardware_available": false,
+      "frozen_bytes_preserved": false
+    },
+    {
+      "id": "2A.P0003",
+      "kind": "property",
+      "baseline_status": "待冻结",
+      "feature": "health-policy",
+      "owner": "device-configuration",
+      "validation": "typed-codec/delegated DTO validator implemented",
+      "hardware_available": false,
+      "frozen_bytes_preserved": false
+    },
+    {
+      "id": "2D.P0001",
+      "kind": "property",
+      "baseline_status": "待冻结",
+      "feature": "womens-health",
+      "owner": "device-wellness",
+      "validation": "typed-codec/delegated DTO validator implemented",
+      "hardware_available": false,
+      "frozen_bytes_preserved": false
+    },
+    {
+      "id": "2E.P0001",
+      "kind": "property",
+      "baseline_status": "待冻结",
+      "feature": "uv",
+      "owner": "device-wellness",
+      "validation": "typed-codec/delegated DTO validator implemented",
+      "hardware_available": false,
+      "frozen_bytes_preserved": false
+    },
+    {
+      "id": "通用.PF000",
+      "kind": "property",
+      "baseline_status": "完整合同",
+      "feature": "limits + selected module",
+      "owner": "device-configuration",
+      "validation": "typed-codec/delegated DTO validator implemented",
+      "hardware_available": false,
+      "frozen_bytes_preserved": true
+    },
+    {
+      "id": "02.P0001",
+      "kind": "property",
+      "baseline_status": "待冻结",
+      "feature": "device",
+      "owner": "device-configuration",
+      "validation": "typed-codec/delegated DTO validator implemented",
+      "hardware_available": false,
+      "frozen_bytes_preserved": false
+    },
+    {
+      "id": "02.P0002",
+      "kind": "property",
+      "baseline_status": "完整合同",
+      "feature": "device",
+      "owner": "device-configuration",
+      "validation": "typed-codec/delegated DTO validator implemented",
+      "hardware_available": false,
+      "frozen_bytes_preserved": true
+    },
+    {
+      "id": "02.P0003",
+      "kind": "property",
+      "baseline_status": "完整合同",
+      "feature": "device",
+      "owner": "device-configuration",
+      "validation": "typed-codec/delegated DTO validator implemented",
+      "hardware_available": false,
+      "frozen_bytes_preserved": true
+    },
+    {
+      "id": "02.P0004",
+      "kind": "property",
+      "baseline_status": "待冻结",
+      "feature": "device",
+      "owner": "device-configuration",
+      "validation": "typed-codec/delegated DTO validator implemented",
+      "hardware_available": false,
+      "frozen_bytes_preserved": false
+    },
+    {
+      "id": "02.P0005",
+      "kind": "property",
+      "baseline_status": "完整合同",
+      "feature": "device",
+      "owner": "device-configuration",
+      "validation": "typed-codec/delegated DTO validator implemented",
+      "hardware_available": false,
+      "frozen_bytes_preserved": true
+    },
+    {
+      "id": "02.P0006",
+      "kind": "property",
+      "baseline_status": "待冻结",
+      "feature": "device",
+      "owner": "device-configuration",
+      "validation": "typed-codec/delegated DTO validator implemented",
+      "hardware_available": false,
+      "frozen_bytes_preserved": false
+    },
+    {
+      "id": "02.P0007",
+      "kind": "property",
+      "baseline_status": "待冻结",
+      "feature": "device",
+      "owner": "device-configuration",
+      "validation": "typed-codec/delegated DTO validator implemented",
+      "hardware_available": false,
+      "frozen_bytes_preserved": false
+    },
+    {
+      "id": "04.P0001",
+      "kind": "property",
+      "baseline_status": "完整合同",
+      "feature": "settings",
+      "owner": "device-configuration",
+      "validation": "typed-codec/delegated DTO validator implemented",
+      "hardware_available": false,
+      "frozen_bytes_preserved": true
+    },
+    {
+      "id": "04.P0002",
+      "kind": "property",
+      "baseline_status": "待冻结",
+      "feature": "settings",
+      "owner": "device-configuration",
+      "validation": "typed-codec/delegated DTO validator implemented",
+      "hardware_available": false,
+      "frozen_bytes_preserved": false
+    },
+    {
+      "id": "04.P0003",
+      "kind": "property",
+      "baseline_status": "待冻结",
+      "feature": "settings",
+      "owner": "device-configuration",
+      "validation": "typed-codec/delegated DTO validator implemented",
+      "hardware_available": false,
+      "frozen_bytes_preserved": false
+    },
+    {
+      "id": "04.P0004",
+      "kind": "property",
+      "baseline_status": "完整合同",
+      "feature": "settings",
+      "owner": "device-configuration",
+      "validation": "typed-codec/delegated DTO validator implemented",
+      "hardware_available": false,
+      "frozen_bytes_preserved": true
+    },
+    {
+      "id": "04.P0005",
+      "kind": "property",
+      "baseline_status": "完整合同",
+      "feature": "settings",
+      "owner": "device-configuration",
+      "validation": "typed-codec/delegated DTO validator implemented",
+      "hardware_available": false,
+      "frozen_bytes_preserved": true
+    },
+    {
+      "id": "04.P0006",
+      "kind": "property",
+      "baseline_status": "完整合同",
+      "feature": "settings",
+      "owner": "device-configuration",
+      "validation": "typed-codec/delegated DTO validator implemented",
+      "hardware_available": false,
+      "frozen_bytes_preserved": true
+    },
+    {
+      "id": "04.P0007",
+      "kind": "property",
+      "baseline_status": "完整合同",
+      "feature": "settings",
+      "owner": "device-configuration",
+      "validation": "typed-codec/delegated DTO validator implemented",
+      "hardware_available": false,
+      "frozen_bytes_preserved": true
+    },
+    {
+      "id": "04.P0008",
+      "kind": "property",
+      "baseline_status": "完整合同",
+      "feature": "settings",
+      "owner": "device-configuration",
+      "validation": "typed-codec/delegated DTO validator implemented",
+      "hardware_available": false,
+      "frozen_bytes_preserved": true
+    },
+    {
+      "id": "04.P0009",
+      "kind": "property",
+      "baseline_status": "待冻结",
+      "feature": "settings",
+      "owner": "device-configuration",
+      "validation": "typed-codec/delegated DTO validator implemented",
+      "hardware_available": false,
+      "frozen_bytes_preserved": false
+    },
+    {
+      "id": "04.P000A",
+      "kind": "property",
+      "baseline_status": "待冻结",
+      "feature": "settings",
+      "owner": "device-configuration",
+      "validation": "typed-codec/delegated DTO validator implemented",
+      "hardware_available": false,
+      "frozen_bytes_preserved": false
+    },
+    {
+      "id": "04.O0001",
+      "kind": "object",
+      "baseline_status": "完整合同",
+      "feature": "settings",
+      "owner": "device-configuration",
+      "validation": "typed-codec/delegated DTO validator implemented",
+      "hardware_available": false,
+      "frozen_bytes_preserved": true
+    },
+    {
+      "id": "05.P0001",
+      "kind": "property",
+      "baseline_status": "完整合同",
+      "feature": "reminders",
+      "owner": "device-models",
+      "validation": "typed-codec/delegated DTO validator implemented",
+      "hardware_available": false,
+      "frozen_bytes_preserved": true
+    },
+    {
+      "id": "05.O0001",
+      "kind": "object",
+      "baseline_status": "待冻结",
+      "feature": "reminders",
+      "owner": "device-models",
+      "validation": "typed-codec/delegated DTO validator implemented",
+      "hardware_available": false,
+      "frozen_bytes_preserved": false
+    },
+    {
+      "id": "05.O0002",
+      "kind": "object",
+      "baseline_status": "待冻结",
+      "feature": "reminders",
+      "owner": "device-models",
+      "validation": "typed-codec/delegated DTO validator implemented",
+      "hardware_available": false,
+      "frozen_bytes_preserved": false
+    },
+    {
+      "id": "05.O0003",
+      "kind": "object",
+      "baseline_status": "待冻结",
+      "feature": "reminders",
+      "owner": "device-models",
+      "validation": "typed-codec/delegated DTO validator implemented",
+      "hardware_available": false,
+      "frozen_bytes_preserved": false
+    },
+    {
+      "id": "05.O0004",
+      "kind": "object",
+      "baseline_status": "待冻结",
+      "feature": "reminders",
+      "owner": "device-models",
+      "validation": "typed-codec/delegated DTO validator implemented",
+      "hardware_available": false,
+      "frozen_bytes_preserved": false
+    },
+    {
+      "id": "05.O0005",
+      "kind": "object",
+      "baseline_status": "待冻结",
+      "feature": "reminders",
+      "owner": "device-models",
+      "validation": "typed-codec/delegated DTO validator implemented",
+      "hardware_available": false,
+      "frozen_bytes_preserved": false
+    },
+    {
+      "id": "05.O0006",
+      "kind": "object",
+      "baseline_status": "待冻结",
+      "feature": "reminders",
+      "owner": "device-models",
+      "validation": "typed-codec/delegated DTO validator implemented",
+      "hardware_available": false,
+      "frozen_bytes_preserved": false
+    },
+    {
+      "id": "06.P0001",
+      "kind": "property",
+      "baseline_status": "完整合同",
+      "feature": "find",
+      "owner": "device-configuration",
+      "validation": "typed-codec/delegated DTO validator implemented",
+      "hardware_available": false,
+      "frozen_bytes_preserved": true
+    },
+    {
+      "id": "07.P0001",
+      "kind": "property",
+      "baseline_status": "待冻结",
+      "feature": "external-content",
+      "owner": "SchemaProvider / device-content",
+      "validation": "explicit-provider-required; not implemented in this crate",
+      "hardware_available": false,
+      "frozen_bytes_preserved": false
+    },
+    {
+      "id": "07.P0002",
+      "kind": "property",
+      "baseline_status": "待冻结",
+      "feature": "external-content",
+      "owner": "SchemaProvider / device-content",
+      "validation": "explicit-provider-required; not implemented in this crate",
+      "hardware_available": false,
+      "frozen_bytes_preserved": false
+    },
+    {
+      "id": "07.P0003",
+      "kind": "property",
+      "baseline_status": "完整合同",
+      "feature": "external-content",
+      "owner": "SchemaProvider / device-content",
+      "validation": "explicit-provider-required; not implemented in this crate",
+      "hardware_available": false,
+      "frozen_bytes_preserved": true
+    },
+    {
+      "id": "07.P0004",
+      "kind": "property",
+      "baseline_status": "完整合同",
+      "feature": "external-content",
+      "owner": "SchemaProvider / device-content",
+      "validation": "explicit-provider-required; not implemented in this crate",
+      "hardware_available": false,
+      "frozen_bytes_preserved": true
+    },
+    {
+      "id": "07.P0005",
+      "kind": "property",
+      "baseline_status": "完整合同",
+      "feature": "external-content",
+      "owner": "SchemaProvider / device-content",
+      "validation": "explicit-provider-required; not implemented in this crate",
+      "hardware_available": false,
+      "frozen_bytes_preserved": true
+    },
+    {
+      "id": "08.P0001",
+      "kind": "property",
+      "baseline_status": "待冻结",
+      "feature": "external-content",
+      "owner": "SchemaProvider / device-content",
+      "validation": "explicit-provider-required; not implemented in this crate",
+      "hardware_available": false,
+      "frozen_bytes_preserved": false
+    },
+    {
+      "id": "09.P0001",
+      "kind": "property",
+      "baseline_status": "待冻结",
+      "feature": "telemetry",
+      "owner": "device-configuration",
+      "validation": "typed-codec/delegated DTO validator implemented",
+      "hardware_available": false,
+      "frozen_bytes_preserved": false
+    },
+    {
+      "id": "11.P0001",
+      "kind": "property",
+      "baseline_status": "完整合同",
+      "feature": "extension",
+      "owner": "device-configuration",
+      "validation": "typed-codec/delegated DTO validator implemented",
+      "hardware_available": false,
+      "frozen_bytes_preserved": true
+    },
+    {
+      "id": "30.O0001",
+      "kind": "object",
+      "baseline_status": "待冻结",
+      "feature": "external-content",
+      "owner": "SchemaProvider / device-content",
+      "validation": "explicit-provider-required; not implemented in this crate",
+      "hardware_available": false,
+      "frozen_bytes_preserved": false
+    },
+    {
+      "id": "30.P0001",
+      "kind": "property",
+      "baseline_status": "待冻结",
+      "feature": "external-content",
+      "owner": "SchemaProvider / device-content",
+      "validation": "explicit-provider-required; not implemented in this crate",
+      "hardware_available": false,
+      "frozen_bytes_preserved": false
+    },
+    {
+      "id": "30.P0002",
+      "kind": "property",
+      "baseline_status": "完整合同",
+      "feature": "external-content",
+      "owner": "SchemaProvider / device-content",
+      "validation": "explicit-provider-required; not implemented in this crate",
+      "hardware_available": false,
+      "frozen_bytes_preserved": true
+    },
+    {
+      "id": "30.P0003",
+      "kind": "property",
+      "baseline_status": "待冻结",
+      "feature": "external-content",
+      "owner": "SchemaProvider / device-content",
+      "validation": "explicit-provider-required; not implemented in this crate",
+      "hardware_available": false,
+      "frozen_bytes_preserved": false
+    },
+    {
+      "id": "31.P0001",
+      "kind": "property",
+      "baseline_status": "完整合同",
+      "feature": "external-content",
+      "owner": "SchemaProvider / device-content",
+      "validation": "explicit-provider-required; not implemented in this crate",
+      "hardware_available": false,
+      "frozen_bytes_preserved": true
+    },
+    {
+      "id": "31.O0001",
+      "kind": "object",
+      "baseline_status": "待冻结",
+      "feature": "external-content",
+      "owner": "SchemaProvider / device-content",
+      "validation": "explicit-provider-required; not implemented in this crate",
+      "hardware_available": false,
+      "frozen_bytes_preserved": false
+    },
+    {
+      "id": "32.O0001",
+      "kind": "object",
+      "baseline_status": "待冻结",
+      "feature": "external-content",
+      "owner": "SchemaProvider / device-content",
+      "validation": "explicit-provider-required; not implemented in this crate",
+      "hardware_available": false,
+      "frozen_bytes_preserved": false
+    },
+    {
+      "id": "34.O0001",
+      "kind": "object",
+      "baseline_status": "完整合同",
+      "feature": "external-content",
+      "owner": "SchemaProvider / device-content",
+      "validation": "explicit-provider-required; not implemented in this crate",
+      "hardware_available": false,
+      "frozen_bytes_preserved": true
+    },
+    {
+      "id": "35.O0001",
+      "kind": "object",
+      "baseline_status": "待冻结",
+      "feature": "external-content",
+      "owner": "SchemaProvider / device-content",
+      "validation": "explicit-provider-required; not implemented in this crate",
+      "hardware_available": false,
+      "frozen_bytes_preserved": false
+    },
+    {
+      "id": "36.O0001",
+      "kind": "object",
+      "baseline_status": "完整合同",
+      "feature": "external-content",
+      "owner": "SchemaProvider / device-content",
+      "validation": "explicit-provider-required; not implemented in this crate",
+      "hardware_available": false,
+      "frozen_bytes_preserved": true
+    },
+    {
+      "id": "37.O0001",
+      "kind": "object",
+      "baseline_status": "待冻结",
+      "feature": "hid",
+      "owner": "device-configuration",
+      "validation": "typed-codec/delegated DTO validator implemented",
+      "hardware_available": false,
+      "frozen_bytes_preserved": false
+    },
+    {
+      "id": "38.P0001",
+      "kind": "property",
+      "baseline_status": "待冻结",
+      "feature": "antplus",
+      "owner": "device-configuration",
+      "validation": "typed-codec/delegated DTO validator implemented",
+      "hardware_available": false,
+      "frozen_bytes_preserved": false
+    },
+    {
+      "id": "39.P0001",
+      "kind": "property",
+      "baseline_status": "完整合同",
+      "feature": "radiation",
+      "owner": "device-configuration",
+      "validation": "typed-codec/delegated DTO validator implemented",
+      "hardware_available": false,
+      "frozen_bytes_preserved": true
+    },
+    {
+      "id": "72.P0001",
+      "kind": "property",
+      "baseline_status": "待冻结",
+      "feature": "engineering",
+      "owner": "device-configuration",
+      "validation": "typed-codec/delegated DTO validator implemented",
+      "hardware_available": false,
+      "frozen_bytes_preserved": false
+    },
+    {
+      "id": "72.P0002",
+      "kind": "property",
+      "baseline_status": "待冻结",
+      "feature": "engineering",
+      "owner": "device-configuration",
+      "validation": "typed-codec/delegated DTO validator implemented",
+      "hardware_available": false,
+      "frozen_bytes_preserved": false
+    },
+    {
+      "id": "72.P0003",
+      "kind": "property",
+      "baseline_status": "待冻结",
+      "feature": "engineering",
+      "owner": "device-configuration",
+      "validation": "typed-codec/delegated DTO validator implemented",
+      "hardware_available": false,
+      "frozen_bytes_preserved": false
+    },
+    {
+      "id": "72.P0004",
+      "kind": "property",
+      "baseline_status": "待冻结",
+      "feature": "engineering",
+      "owner": "device-configuration",
+      "validation": "typed-codec/delegated DTO validator implemented",
+      "hardware_available": false,
+      "frozen_bytes_preserved": false
+    },
+    {
+      "id": "72.O待冻结",
+      "kind": "object",
+      "baseline_status": "待冻结",
+      "feature": "engineering",
+      "owner": "device-configuration",
+      "validation": "typed-codec/delegated DTO validator implemented",
+      "hardware_available": false,
+      "frozen_bytes_preserved": false
+    }
+  ],
+  "new_endpoints": [
+    {
+      "id": "04.P000B",
+      "feature": "settings",
+      "validation": "typed read-only brightness directory"
+    },
+    {
+      "id": "38.P0002",
+      "feature": "antplus",
+      "validation": "typed read-only actual-state DTO"
+    }
+  ],
+  "preserved_reserved": [
+    "40.RESERVED"
+  ],
+  "contracts_sha256": {
+    "target/application-protocol-review/coverage-v05.json": "fce8882866b5b24df220632a512b3391aaa12e9b4f64a33f9454ebc9cc6af189",
+    "specs/protocol/v06-contract-proposal.json": "aabd5bc6a37fd5f1397c3e6db235c4ec0755f928b78de68de882fa64f42f861b"
+  }
+}

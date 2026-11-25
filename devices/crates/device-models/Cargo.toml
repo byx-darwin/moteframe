@@ -1,0 +1,21 @@
+[package]
+name = "device-models"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[features]
+default = []
+profile = []
+device = []
+settings = []
+reminders = ["settings"]
+notifications = []
+weather = []
+
+[dependencies]
+device-protocol = { version = "=0.1.0", path = "../device-protocol" }
+
+[lints]
+workspace = true

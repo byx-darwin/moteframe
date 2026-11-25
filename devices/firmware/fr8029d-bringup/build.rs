@@ -1,0 +1,147 @@
+//! Select the FR8029D memory layout and build the opt-in `FreeRTOS` kernel.
+use std::{
+    env,
+    error::Error,
+    path::{Path, PathBuf},
+    process::Command,
+};
+
+const FREERTOS_REVISION: &str = "0adc196d4bd52a2d91102b525b0aafc1e14a2386";
+
+fn main() -> Result<(), Box<dyn Error>> {
+    let startup_probe = env::var_os("CARGO_FEATURE_PROBE").is_some();
+    let advertising_probe = env::var_os("CARGO_FEATURE_BLE_ADV_PROBE").is_some();
+    if !startup_probe && !advertising_probe {
+        return Ok(());
+    }
+    if env::var("TARGET")? != "thumbv8m.main-none-eabi" {
+        return Err("the probe requires --target thumbv8m.main-none-eabi".into());
+    }
+
+    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR")?);
+    let script = manifest_dir.join("link.x");
+    println!("cargo:rerun-if-changed=link.x");
+    if startup_probe {
+        link_probe(
+            "fr8029d-bringup",
+            &script,
+            env::var_os("CARGO_FEATURE_RAM_PROBE").is_some(),
+        );
+    }
+    if advertising_probe {
+        let connect_probe = env::var_os("CARGO_FEATURE_BLE_CONNECT_PROBE").is_some();
+        let gatt_board = env::var_os("CARGO_FEATURE_BLE_GATT_BOARD").is_some();
+        let gatt_xip = env::var_os("CARGO_FEATURE_BLE_GATT_XIP").is_some();
+        let advertising_in_sram =
+            !gatt_xip && (connect_probe || env::var_os("CARGO_FEATURE_BLE_ADV_COLD_XIP").is_none());
+        if gatt_board {
+            println!("cargo:rustc-link-arg-bin=fr8029d-ble-adv=--defsym=__gatt_board_probe=1");
+        } else if connect_probe {
+            println!("cargo:rustc-link-arg-bin=fr8029d-ble-adv=--defsym=__wide_sram_probe=1");
+        }
+        if env::var_os("CARGO_FEATURE_BLE_GATT_FREERTOS").is_some() {
+            build_freertos(&manifest_dir)?;
+            println!("cargo:rustc-link-arg-bin=fr8029d-ble-adv=--defsym=__gatt_freertos=1");
+        }
+        link_probe("fr8029d-ble-adv", &script, advertising_in_sram);
+    }
+    Ok(())
+}
+
+fn link_probe(name: &str, script: &Path, in_sram: bool) {
+    if in_sram {
+        println!("cargo:rustc-link-arg-bin={name}=--defsym=__probe_in_sram=1");
+    }
+    println!("cargo:rustc-link-arg-bin={name}=-T{}", script.display());
+    println!("cargo:rustc-link-arg-bin={name}=--nmagic");
+}
+
+fn build_freertos(manifest_dir: &Path) -> Result<(), Box<dyn Error>> {
+    println!("cargo:rerun-if-env-changed=FREERTOS_KERNEL_DIR");
+    println!("cargo:rerun-if-env-changed=FREERTOS_CLANG");
+
+    let config = manifest_dir.join("freertos");
+    let kernel = env::var_os("FREERTOS_KERNEL_DIR").map_or_else(
+        || manifest_dir.join("../../target/fr8029d-freertos/kernel"),
+        PathBuf::from,
+    );
+    let revision = Command::new("git")
+        .arg("-C")
+        .arg(&kernel)
+        .args(["rev-parse", "HEAD"])
+        .output()?;
+    if !revision.status.success()
+        || String::from_utf8_lossy(&revision.stdout).trim() != FREERTOS_REVISION
+    {
+        return Err(format!(
+            concat!(
+                "FreeRTOS-Kernel V11.2.0 ({}) is required at {}. ",
+                "Clone https://github.com/FreeRTOS/FreeRTOS-Kernel.git with ",
+                "--depth 1 --branch V11.2.0 or set FREERTOS_KERNEL_DIR to the pinned checkout."
+            ),
+            FREERTOS_REVISION,
+            kernel.display(),
+        )
+        .into());
+    }
+    let kernel = kernel.canonicalize()?;
+    let include = kernel.join("include");
+    let port = kernel.join("portable/GCC/ARM_CM33_NTZ/non_secure");
+    let out_dir = PathBuf::from(env::var_os("OUT_DIR").ok_or("OUT_DIR is missing")?);
+    let clang = env::var_os("FREERTOS_CLANG").unwrap_or_else(|| "clang".into());
+    for input in [&config, &include, &port] {
+        println!("cargo:rerun-if-changed={}", input.display());
+    }
+    for source in [
+        kernel.join("tasks.c"),
+        kernel.join("list.c"),
+        port.join("port.c"),
+        port.join("portasm.c"),
+        config.join("fr29_freertos.c"),
+    ] {
+        println!("cargo:rerun-if-changed={}", source.display());
+        let object = out_dir
+            .join(
+                source
+                    .file_name()
+                    .ok_or("FreeRTOS source name is missing")?,
+            )
+            .with_extension("o");
+        let status = Command::new(&clang)
+            .args([
+                "--target=thumbv8m.main-none-eabi",
+                "-mcpu=cortex-m33",
+                "-mthumb",
+                "-mfloat-abi=soft",
+                "-std=c11",
+                "-Os",
+                "-ffreestanding",
+                "-ffunction-sections",
+                "-fdata-sections",
+                "-fno-unwind-tables",
+                "-fno-asynchronous-unwind-tables",
+                "-Werror=implicit-function-declaration",
+            ])
+            .arg("-I")
+            .arg(&config)
+            .arg("-I")
+            .arg(&include)
+            .arg("-I")
+            .arg(&port)
+            .arg("-isystem")
+            .arg(config.join("freestanding"))
+            .arg("-c")
+            .arg(&source)
+            .arg("-o")
+            .arg(&object)
+            .status()?;
+        if !status.success() {
+            return Err(format!("clang could not compile {}", source.display()).into());
+        }
+        println!(
+            "cargo:rustc-link-arg-bin=fr8029d-ble-adv={}",
+            object.display()
+        );
+    }
+    Ok(())
+}

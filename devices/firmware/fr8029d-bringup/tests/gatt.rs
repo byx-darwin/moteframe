@@ -1,0 +1,361 @@
+//! Exercise the FR profile on the actual Host with a scripted radio boundary.
+#![allow(clippy::unwrap_used, reason = "Unexpected fixture or protocol failure")]
+
+use ble_controller::{
+    ConnectionParameters, Controller, FrameKind, HciController, LinkBackend, LinkEvent, LinkFrame,
+    Peer, RandomAddress, TxAdmission, Version,
+};
+use ble_host_trouble::{Resources, build, host::prelude::*};
+use embassy_sync::blocking_mutex::raw::NoopRawMutex;
+use fr8029d_bringup::gatt::{GattProfile, GattProgress};
+use fr8029d_bringup::gatt_runner::{CommittedValue, GattIdentity, GattReport, GattRunError, run};
+use moteframe_ble::WriteSlot;
+use std::{
+    cell::{Cell, RefCell},
+    collections::VecDeque,
+    future::Future,
+    pin::pin,
+    rc::Rc,
+    sync::Mutex,
+    task::{Context, Waker},
+};
+
+// The pinned Host configuration has one global four-packet pool.
+static HOST_FIXTURE: Mutex<()> = Mutex::new(());
+
+#[derive(Debug, Default)]
+struct RadioState {
+    advertising: bool,
+    advertisement: Option<ble_controller::Advertisement>,
+    incoming: VecDeque<LinkEvent>,
+    replies: VecDeque<Vec<u8>>,
+}
+
+#[derive(Clone, Debug, Default)]
+struct ScriptedRadio(Rc<RefCell<RadioState>>);
+
+impl LinkBackend for ScriptedRadio {
+    type Error = ();
+
+    fn reset(&mut self) -> Result<(), ()> {
+        *self.0.borrow_mut() = RadioState::default();
+        Ok(())
+    }
+
+    fn advertise(&mut self, advertisement: &ble_controller::Advertisement) -> Result<(), ()> {
+        let mut state = self.0.borrow_mut();
+        state.advertising = true;
+        state.advertisement = Some(*advertisement);
+        Ok(())
+    }
+
+    fn stop(&mut self) -> Result<(), ()> {
+        self.0.borrow_mut().advertising = false;
+        Ok(())
+    }
+
+    fn poll(&mut self) -> Result<Option<LinkEvent>, ()> {
+        Ok(self.0.borrow_mut().incoming.pop_front())
+    }
+
+    fn transmit(&mut self, token: u32, frame: LinkFrame) -> Result<TxAdmission, ()> {
+        let mut state = self.0.borrow_mut();
+        if frame.kind() == FrameKind::Start && frame.payload()[2..4] == [4, 0] {
+            state.replies.push_back(frame.payload()[4..].to_vec());
+        }
+        state.incoming.push_back(LinkEvent::Acknowledged(token));
+        Ok(TxAdmission::Committed)
+    }
+
+    fn connection_update(&mut self, _: &[u8]) -> Result<(), ()> {
+        Ok(())
+    }
+
+    fn channel_map(&mut self, _: &[u8]) -> Result<(), ()> {
+        Ok(())
+    }
+}
+
+impl ScriptedRadio {
+    fn event(&self, event: LinkEvent) {
+        self.0.borrow_mut().incoming.push_back(event);
+    }
+
+    fn inject_att(&self, request: &[u8]) {
+        let mut payload = vec![u8::try_from(request.len()).unwrap(), 0, 4, 0];
+        payload.extend_from_slice(request);
+        self.event(LinkEvent::Received(
+            LinkFrame::new(FrameKind::Start, &payload).unwrap(),
+        ));
+    }
+
+    fn exchange(&self, pump: &mut impl FnMut(), request: &[u8], response: &[u8]) {
+        self.inject_att(request);
+        pump_until(pump, || !self.0.borrow().replies.is_empty());
+        let actual = self.0.borrow_mut().replies.pop_front().unwrap();
+        assert_eq!(actual, response, "ATT request {request:02x?}");
+    }
+}
+
+fn pump_until(pump: &mut impl FnMut(), done: impl Fn() -> bool) {
+    for _ in 0..512 {
+        pump();
+        if done() {
+            return;
+        }
+    }
+    panic!("scripted link stopped making progress");
+}
+
+#[test]
+fn test_should_leave_a_short_attribute_table_untouched() {
+    let mut storage = [0; 8];
+    let mut table: AttributeTable<'_, NoopRawMutex, 3> = AttributeTable::new();
+    assert!(GattProfile::add(&mut table, &mut storage).is_err());
+    assert_eq!(table.len(), 0);
+}
+
+#[test]
+#[allow(
+    clippy::too_many_lines,
+    reason = "The request and response sequence stays visible as one connection"
+)]
+fn test_should_discover_read_and_commit_only_complete_write_requests() {
+    let _fixture = HOST_FIXTURE.lock().unwrap();
+    let radio = ScriptedRadio::default();
+    let hci = HciController::new(Controller::new(radio.clone(), Version::new(8, 0xffff, 1)));
+    let mut resources = Resources::new();
+    let stack = build(
+        hci,
+        &mut resources,
+        RandomAddress::new([1, 2, 3, 4, 5, 0xc0]).unwrap(),
+    );
+    let mut storage = [0xa5; 8];
+    let mut table: AttributeTable<'_, NoopRawMutex, 4> = AttributeTable::new();
+    let profile = GattProfile::add(&mut table, &mut storage).unwrap();
+    let server = AttributeServer::<NoopRawMutex, DefaultPacketPool, 4, 1>::new(table);
+    let mut runner = stack.runner();
+    let mut peripheral = stack.peripheral();
+    let connected = Cell::new(false);
+    let disconnected = Cell::new(false);
+    let committed = Cell::new(0);
+    let delivered = Cell::new(None);
+    let mut host = pin!(runner.run());
+    let mut app = pin!(async {
+        let acceptor = peripheral
+            .advertise(
+                &AdvertisementParameters::default(),
+                Advertisement::ConnectableScannableUndirected {
+                    adv_data: &[2, 1, 6],
+                    scan_data: &[],
+                },
+            )
+            .await
+            .unwrap();
+        let connection = acceptor
+            .accept()
+            .await
+            .unwrap()
+            .with_attribute_server(&server)
+            .unwrap();
+        let mut writes = WriteSlot::new();
+        connected.set(true);
+        loop {
+            match profile
+                .handle(connection.next().await, &mut writes)
+                .await
+                .unwrap()
+            {
+                GattProgress::Continue => {}
+                GattProgress::Committed => committed.set(committed.get() + 1),
+                GattProgress::Disconnected => break,
+            }
+        }
+        let mut bytes = [0; 8];
+        delivered.set(Some((
+            writes.take_into(&mut bytes).unwrap().unwrap(),
+            bytes,
+        )));
+        disconnected.set(true);
+    });
+    let mut pump = || {
+        let mut context = Context::from_waker(Waker::noop());
+        assert!(host.as_mut().poll(&mut context).is_pending());
+        let _ = app.as_mut().poll(&mut context);
+    };
+    pump_until(&mut pump, || radio.0.borrow().advertising);
+    radio.event(LinkEvent::Connected(
+        Peer::new([7; 6], true),
+        ConnectionParameters::new(24, 0, 72).unwrap(),
+    ));
+    pump_until(&mut pump, || connected.get());
+
+    radio.exchange(&mut pump, &[0x02, 64, 0], &[0x03, 23, 0]);
+    radio.exchange(
+        &mut pump,
+        &[0x10, 1, 0, 0xff, 0xff, 0x00, 0x28],
+        &[
+            0x11, 20, 1, 0, 0xff, 0xff, 0x51, 0xb2, 0x35, 0xc7, 0xeb, 0xd6, 0x4e, 0xa6, 0xb0, 0x48,
+            0xf7, 0x7f, 0xd0, 0x29, 0x80, 0x2f,
+        ],
+    );
+    radio.exchange(
+        &mut pump,
+        &[0x08, 1, 0, 0xff, 0xff, 0x03, 0x28],
+        &[
+            0x09, 21, 2, 0, 0x1a, 3, 0, 0x51, 0xb2, 0x35, 0xc7, 0xeb, 0xd6, 0x4e, 0xa6, 0xb0, 0x48,
+            0xf7, 0x7f, 0xd1, 0x29, 0x80, 0x2f,
+        ],
+    );
+    radio.exchange(&mut pump, &[0x0a, 3, 0], &[0x0b, 0, 0, 0, 0, 0, 0, 0, 0]);
+    for invalid in [
+        &[0x12, 3, 0][..],
+        &[0x12, 3, 0, 0xff],
+        &[0x12, 3, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+    ] {
+        radio.exchange(&mut pump, invalid, &[0x01, 0x12, 3, 0, 0x0d]);
+    }
+    radio.exchange(
+        &mut pump,
+        &[0x16, 3, 0, 0, 0, 0xff],
+        &[0x01, 0x16, 0, 0, 0x06],
+    );
+    radio.inject_att(&[0x52, 3, 0, 9, 8, 7, 6, 5, 4, 3, 2]);
+    radio.exchange(&mut pump, &[0x0a, 3, 0], &[0x0b, 0, 0, 0, 0, 0, 0, 0, 0]);
+    assert_eq!(committed.get(), 0);
+
+    radio.exchange(&mut pump, &[0x12, 3, 0, 1, 3, 5, 7, 2, 4, 6, 8], &[0x13]);
+    radio.exchange(
+        &mut pump,
+        &[0x12, 3, 0, 8, 6, 4, 2, 7, 5, 3, 1],
+        &[0x01, 0x12, 3, 0, 0x11],
+    );
+    radio.exchange(&mut pump, &[0x0a, 3, 0], &[0x0b, 1, 3, 5, 7, 2, 4, 6, 8]);
+    assert_eq!(committed.get(), 1);
+
+    radio.event(LinkEvent::Disconnected(0x13));
+    pump_until(&mut pump, || disconnected.get());
+    let (meta, bytes) = delivered.get().unwrap();
+    assert_eq!(meta.target, 3);
+    assert_eq!(meta.length, 8);
+    assert_eq!(bytes, [1, 3, 5, 7, 2, 4, 6, 8]);
+}
+
+#[test]
+fn test_should_report_committed_writes_and_resume_advertising_on_the_real_runner() {
+    let _fixture = HOST_FIXTURE.lock().unwrap();
+    let radio = ScriptedRadio::default();
+    let mut resources = Resources::new();
+    let reports = RefCell::new(Vec::new());
+    let identity = GattIdentity {
+        address: RandomAddress::new([1, 2, 3, 4, 5, 0xc0]).unwrap(),
+        version: Version::new(8, 0xffff, 1),
+        name: "FR29-GATT",
+        advertising_data: b"\x02\x01\x06\x0a\x09FR29-GATT",
+    };
+    let mut app = pin!(run(radio.clone(), &mut resources, identity, |report| {
+        reports.borrow_mut().push(report);
+    }));
+    let mut pump = || {
+        let mut context = Context::from_waker(Waker::noop());
+        if let std::task::Poll::Ready(error) = app.as_mut().poll(&mut context) {
+            panic!("board runner exited with {error:?}");
+        }
+    };
+    let peer = Peer::new([7; 6], true);
+    let parameters = ConnectionParameters::new(24, 0, 72).unwrap();
+    pump_until(&mut pump, || reports.borrow().len() == 1);
+    let advertisement = radio.0.borrow().advertisement.unwrap();
+    assert_eq!(advertisement.address.bytes(), [1, 2, 3, 4, 5, 0xc0]);
+    assert_eq!(
+        advertisement.data.as_slice(),
+        b"\x02\x01\x06\x0a\x09FR29-GATT"
+    );
+    radio.event(LinkEvent::Connected(peer, parameters));
+    pump_until(&mut pump, || reports.borrow().len() == 2);
+    radio.exchange(&mut pump, &[0x0a, 3, 0], b"\x0bFR29-GATT");
+    radio.exchange(&mut pump, &[0x0a, 9, 0], &[0x0b, 0, 0, 0, 0, 0, 0, 0, 0]);
+    radio.exchange(
+        &mut pump,
+        &[0x12, 9, 0, 1, 2, 3, 4],
+        &[0x01, 0x12, 9, 0, 0x0d],
+    );
+    assert_eq!(reports.borrow().len(), 2);
+    radio.exchange(&mut pump, &[0x12, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8], &[0x13]);
+    // The first write did not queue an echo. Discover and enable the CCCD.
+    radio.exchange(
+        &mut pump,
+        &[0x04, 10, 0, 10, 0],
+        &[0x05, 1, 10, 0, 0x02, 0x29],
+    );
+    radio.exchange(&mut pump, &[0x12, 10, 0, 1, 0], &[0x13]);
+    radio.exchange(&mut pump, &[0x12, 9, 0, 1], &[0x01, 0x12, 9, 0, 0x0d]);
+    radio.exchange(&mut pump, &[0x12, 9, 0, 9, 8, 7, 6, 5, 4, 3, 2], &[0x13]);
+    pump_until(&mut pump, || !radio.0.borrow().replies.is_empty());
+    assert_eq!(
+        radio.0.borrow_mut().replies.pop_front().unwrap(),
+        [0x1b, 9, 0, 9, 8, 7, 6, 5, 4, 3, 2]
+    );
+    radio.exchange(&mut pump, &[0x12, 10, 0, 0, 0], &[0x13]);
+    radio.exchange(&mut pump, &[0x12, 9, 0, 1, 1, 2, 3, 5, 8, 13, 21], &[0x13]);
+    radio.exchange(&mut pump, &[0x12, 10, 0, 1, 0], &[0x13]);
+    radio.event(LinkEvent::Disconnected(0x13));
+    pump_until(&mut pump, || reports.borrow().len() == 7);
+    radio.event(LinkEvent::Connected(peer, parameters));
+    pump_until(&mut pump, || reports.borrow().len() == 8);
+    radio.exchange(&mut pump, &[0x0a, 10, 0], &[0x0b, 0, 0]);
+    radio.exchange(&mut pump, &[0x0a, 9, 0], &[0x0b, 1, 1, 2, 3, 5, 8, 13, 21]);
+    radio.exchange(&mut pump, &[0x12, 9, 0, 0, 1, 2, 3, 4, 5, 6, 7], &[0x13]);
+    for _ in 0..16 {
+        pump();
+    }
+    assert!(radio.0.borrow().replies.is_empty());
+    assert_eq!(
+        reports.borrow().as_slice(),
+        &[
+            GattReport::Advertising,
+            GattReport::Connected,
+            GattReport::Committed(CommittedValue {
+                handle: 9,
+                bytes: [1, 2, 3, 4, 5, 6, 7, 8],
+            }),
+            GattReport::Committed(CommittedValue {
+                handle: 9,
+                bytes: [9, 8, 7, 6, 5, 4, 3, 2],
+            }),
+            GattReport::Committed(CommittedValue {
+                handle: 9,
+                bytes: [1, 1, 2, 3, 5, 8, 13, 21],
+            }),
+            GattReport::Disconnected,
+            GattReport::Advertising,
+            GattReport::Connected,
+            GattReport::Committed(CommittedValue {
+                handle: 9,
+                bytes: [0, 1, 2, 3, 4, 5, 6, 7],
+            }),
+        ]
+    );
+}
+
+#[test]
+fn test_should_reject_an_oversized_advertisement_without_starting_radio() {
+    let radio = ScriptedRadio::default();
+    let mut resources = Resources::new();
+    let identity = GattIdentity {
+        address: RandomAddress::new([1, 2, 3, 4, 5, 0xc0]).unwrap(),
+        version: Version::new(8, 0xffff, 1),
+        name: "FR29-GATT",
+        // Valid leading flags so the Host would otherwise silently truncate.
+        advertising_data: b"\x02\x01\x06\x1c\x09abcdefghijklmnopqrstuvwxyz!",
+    };
+    let mut app = pin!(run(radio.clone(), &mut resources, identity, |_| {
+        panic!("invalid identity must not report an active application")
+    }));
+    let mut context = Context::from_waker(Waker::noop());
+    assert!(matches!(
+        app.as_mut().poll(&mut context),
+        std::task::Poll::Ready(GattRunError::Host(_))
+    ));
+    assert!(radio.0.borrow().advertisement.is_none());
+}

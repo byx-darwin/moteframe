@@ -112,6 +112,34 @@ class BoundaryTests(unittest.TestCase):
     def test_should_accept_only_reviewed_tracked_paths(self):
         self.assertEqual(BOUNDARY.validate_tracked(["README.md", "crates/moteframe-core/src/lib.rs"]), [])
 
+    def test_should_allow_device_source_and_reject_device_firmware_dumps(self):
+        source = "devices/firmware/fr8029d-bringup/src/main.rs"
+        self.write(source, 'global_asm!("wfi");\n')
+        self.assertEqual(BOUNDARY.validate_files(self.root), [])
+        self.assertEqual(BOUNDARY.validate_tracked([source]), [])
+        dump = "devices/firmware/fr8029d-bringup/fixture.bin"
+        self.write(dump, "unreviewed binary")
+        self.assertIn("binary/resource: " + dump, BOUNDARY.validate_files(self.root))
+        self.assertTrue(BOUNDARY.validate_tracked([dump]))
+        unreviewed = [
+            "devices/firmware/fr8029d-bringup/evidence/stock-readback.json",
+            "devices/firmware/fr8029d-bringup/vendor/rom.txt",
+            "devices/crates/device-unrelated/src/lib.rs",
+        ]
+        for path in unreviewed:
+            self.write(path, "outside the integration scope")
+        self.assertEqual(len(BOUNDARY.validate_tracked(unreviewed)), 3)
+        self.assertEqual(len(BOUNDARY.validate_files(self.root)), 4)
+
+    def test_should_exclude_only_device_cargo_build_directories(self):
+        artifact = "devices/firmware/fr8029d-bringup/target/image.bin"
+        self.write(artifact, "local image")
+        self.assertEqual(BOUNDARY.validate_files(self.root), [])
+        self.assertTrue(BOUNDARY.validate_tracked([artifact]))
+        unreviewed = "devices/crates/device-core/target/image.bin"
+        self.write(unreviewed, "unreviewed image")
+        self.assertIn("binary/resource: " + unreviewed, BOUNDARY.validate_files(self.root))
+
     def test_should_reject_resolved_external_path_patch(self):
         metadata = self.metadata()
         package = self.add_registry_package(metadata)

@@ -1,0 +1,43 @@
+[package]
+name = "device-configuration"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.96.0"
+publish = false
+
+[workspace]
+
+[features]
+default = []
+device = []
+time = []
+settings = ["device-models/settings"]
+find = []
+telemetry = []
+health-policy = ["heart-rate", "blood-pressure", "oxygen", "glucose", "temperature", "wellbeing"]
+heart-rate = []
+blood-pressure = []
+oxygen = ["device-models/settings"]
+glucose = []
+temperature = []
+wellbeing = []
+hid = []
+antplus = []
+engineering = []
+profile = ["device-models/profile"]
+reminders = ["device-models/reminders"]
+sleep = ["device-models/settings", "device-motion/sleep"]
+sport = ["device-motion/sport"]
+activity = ["device-motion/activity"]
+womens-health = ["device-wellness/womens-health"]
+uv = ["device-wellness/uv"]
+extension = []
+radiation = []
+external-content = []
+limits = []
+
+[dependencies]
+device-protocol = { version = "=0.1.0", path = "../device-protocol", default-features = false }
+device-motion = { version = "=0.1.0", path = "../device-motion", default-features = false }
+device-wellness = { version = "=0.1.0", path = "../device-wellness", default-features = false }
+device-models = { version = "=0.1.0", path = "../device-models", default-features = false }

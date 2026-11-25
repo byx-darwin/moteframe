@@ -1,0 +1,13 @@
+# Maintenance and device-job wire plan
+
+Use frozen v05/v06 exact layouts.70 version1.2;71 version1.1;02/72/73 version1.0. Default features empty. Commercial device-jobs must not select the maintenance dependency or70..73. Only Raw BATCH carries its specified46B overhead/CRC; no other packet receives an invented CRC.
+
+Separate actors/handlers: checked shared RawActor is borrowed by RawHandler and core07 credit bridge; SelfTestHandler constructs its engine from the same controlled manifest used for its frozen static LIST; maintenance persistent handlers reuse PersistentEngine and a real start-on-admission executor; independent commercial DeviceJobHandler uses its own real ledger/executor ports and operation0001/0002 schema1 contracts. No hardware/backend simulation in production.
+
+Raw first fragment requires a real FIFO reservation closure. begin_batch and encode happen only inside that reserved slot; success means actual first admission in the same actor boundary. FIFO NoSlot invokes no closure. Commit/transport uncertainty after begin permanently closes/mutes the actor, ends the same shared DATA owner via a mandatory closer, and attempts physical cleanup. Remaining frames are prepare/confirm; final admission alone calls finish_batch. STOP executes once in response_ready and defers until its true drain barrier exists.
+
+TDD: exact codec and independent commercial ledger/admission first; self-test static catalog/results/evidence and timeout; maintenance persistent claim/output/executor callbacks; raw queue reservation and STOP barrier; feature/default/commercial dependency isolation, Host/ARM/strict lint. RED logs must fail assertions after successful compilation. Tests use explicit offline fixtures, not production backends. Only this crate may be edited; no devices/Git.
+
+Review repair: physical cleanup evidence belongs outside the frozen engine. Caller-held CleanupTrace is bound once to one RawPortObserver or SelfTestPortObserver, and each actor constructor takes that concrete exclusive observed port. Its real stop/cancel errors are sticky across internal engine closure and every public path; teardown combines that evidence with actual close results. SelfTest uses one checked engine-call fence across reads, writes, poll and replay, never a periodic-poll-only workaround. These are real port decorators, not replacement production backends.
+
+Known unknown-stream STOP errors remain normal dispatch errors; response_ready only defers actual known drain work. Commercial caller output capacity is checked before claim, while ledger resource capacity is the existing LimitExceeded wire status. No frozen engine, review evidence, packet layout, 71 acceptance ordering or selected dependency changes are needed.

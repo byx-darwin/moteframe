@@ -1,0 +1,18 @@
+[package]
+name = "device-wellness"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.96.0"
+publish = false
+[workspace]
+[features]
+default = []
+rri = []
+womens-health = []
+uv = []
+[lints.rust]
+unsafe_code = "forbid"
+[lints.clippy]
+pedantic = { level = "deny", priority = -1 }
+unwrap_used = "deny"
+expect_used = "deny"

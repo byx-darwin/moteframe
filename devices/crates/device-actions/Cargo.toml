@@ -1,0 +1,21 @@
+[package]
+name = "device-actions"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[features]
+default = []
+system = []
+find = []
+phone = []
+call = []
+media = []
+notification-actions = []
+
+[dependencies]
+device-protocol = { version = "=0.1.0", path = "../device-protocol" }
+
+[lints]
+workspace = true

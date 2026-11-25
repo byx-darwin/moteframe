@@ -1,0 +1,14 @@
+{
+  "compiler": "Apple clang version 21.0.0 (clang-2100.3.34.2)",
+  "flags": [
+    "-O0",
+    "-ffp-contract=off"
+  ],
+  "source_files": {
+    "../V2.2.4/FullResources_\u6539\u590d\u4f4d\u5f15\u811a/Sources/algorithm/AlgorithmBP.c": "dc06a7b51d20d610ba4d0321461473e2e283e15b90299e243c48ea61ffb4dd15",
+    "../V2.2.4/FullResources_\u6539\u590d\u4f4d\u5f15\u811a/Sources/task/Task_Hr.c": "97ef8770d8e902dc1d68822996496c598b637550702248931d0d41f87703f6c1"
+  },
+  "vectors": 1419,
+  "vectors_sha256": "355ca15beacf7046776c616e77b3a026b9f9b4b55fd4a89324d0cc5d95394369",
+  "scope": "Original C calculations extracted unchanged; host ABI/rounding evidence, not Keil or physical measurement validation."
+}

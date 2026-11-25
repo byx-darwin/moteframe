@@ -2,4 +2,15 @@
 extend-exclude = ["target", ".git", "Cargo.lock", "LICENSE-*", "crates/*/LICENSE-*"]
 
 [default]
-extend-ignore-re = ['0x[0-9a-fA-F_]+', '[0-9a-f]{40,64}']
+extend-ignore-re = ['0x[0-9a-fA-F_]+', '[0-9a-f]{40,64}', '[0-9][A-Fa-f0-9]{7}']
+
+[default.extend-words]
+# Stable configuration identifiers and the NOR Write Enable Latch abbreviation.
+womens = "womens"
+WEL = "WEL"
+# Proper name in the upstream font notice and the original advertising name.
+Tak = "Tak"
+Periphreal = "Periphreal"
+
+[default.extend-identifiers]
+UI_BLOOD_OXYGEN_PECENT_11x10 = "UI_BLOOD_OXYGEN_PECENT_11x10"

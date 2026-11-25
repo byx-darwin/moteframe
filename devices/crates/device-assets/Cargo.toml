@@ -1,0 +1,16 @@
+[package]
+name = "device-assets"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+device-core.workspace = true
+device-spi-nor.workspace = true
+
+[dev-dependencies]
+embedded-hal.workspace = true
+
+[lints]
+workspace = true

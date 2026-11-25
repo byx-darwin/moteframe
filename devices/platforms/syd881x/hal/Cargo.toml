@@ -1,0 +1,26 @@
+[package]
+name = "syd881x-hal"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+[dependencies]
+device-core.workspace = true
+embedded-hal.workspace = true
+device-bitbang-i2c.workspace = true
+[features]
+default = []
+hardware = []
+native-radio = ["hardware", "dep:syd881x-radio"]
+[target.'cfg(target_arch = "arm")'.dependencies]
+syd881x-radio = { workspace = true, optional = true }
+[lints.rust]
+unsafe_code = "warn"
+missing_docs = "warn"
+missing_debug_implementations = "warn"
+[lints.clippy]
+pedantic = { level = "deny", priority = -1 }
+undocumented_unsafe_blocks = "deny"
+unwrap_used = "deny"
+expect_used = "deny"
+module_name_repetitions = "allow"

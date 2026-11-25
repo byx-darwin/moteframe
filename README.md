@@ -10,7 +10,7 @@ allocation-free graphics, display transport, bounded buses, storage views and BL
 
 当前 `main` 包含 **0.2.0 源码候选**：类型化颜色接口、UI 配置、资源版本、
 可裁剪功能及刷新恢复，以及只读存储视图、BLE 通知校验和接收写缓冲。
-各 crate 的 Cargo 版本为 `0.2.0`，保持 `publish = false`；
+MoteFrame 通用 crate 的 Cargo 版本为 `0.2.0`，保持 `publish = false`；
 接入时使用仓库源码，尚未发布到 crates.io。本版本包含源 API 变更，
 从 0.1 迁移请参阅[颜色类型迁移指南](docs/color-types.md)。
 
@@ -28,7 +28,7 @@ allocation-free graphics, display transport, bounded buses, storage views and BL
 | [moteframe-input](crates/moteframe-input/README.md) | 可配置按键／单触点手势状态机、有界事件队列 |
 
 ```text
-application + board adapters (outside this project)
+application + board adapters (separate from the portable crates)
   ├── moteframe-ui ────────── embedded-graphics
   │       └── moteframe-core ── embedded-hal
   ├── moteframe-display ─────── moteframe-core + embedded-hal + embedded-graphics-core
@@ -41,8 +41,10 @@ application + board adapters (outside this project)
 
 所有库均为 `no_std`、无堆、禁止 unsafe。主机示例和测试使用 `std`。
 产品业务、具体板级引脚、芯片寄存器、BLE 栈／射频实现、具体 Flash 驱动、产品持久化与算法、
-原机素材及厂商资源不在仓库范围内。通用存储／BLE 模块由固件按依赖选择，不要求 UI 使用它们。
+原机素材及厂商资源不在通用库范围内。通用存储／BLE 模块由固件按依赖选择，不要求 UI 使用它们。
 显示初始化序列和电气时序由调用方提供。
+
+本仓库的独立 [设备工程](devices/README.md) 提供 FR8029D 和 Wattch 5 的构建入口。设备工程直接引用这里的通用 crates。
 
 ## 架构范围与平台适配
 
@@ -442,5 +444,4 @@ Apache-2.0 第 4 条，包括提供许可证、保留适用的版权和 NOTICE �
 NOTICE 可随产品文档／第三方开源声明提供，也可放在通常展示第三方声明的界面；
 不要求增加启动画面。复制 NOTICE 时保留其适用内容，不能只写一句项目名称代替。
 
-每个 crate 均携带 LICENSE 和 NOTICE。上游依赖保留其自己的许可证，见
-[NOTICE.md](NOTICE.md)。本仓库的许可证不适用于被排除的私有产品、素材或厂商软件。
+MoteFrame 通用 crate 各自携带 LICENSE 和 NOTICE。设备工程的第一方源码使用根目录许可和来源声明。上游依赖和字体保留各自的许可证。 [NOTICE.md](NOTICE.md)
