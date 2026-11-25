@@ -1,20 +1,20 @@
 # Source and dependency notices
 
-MoteFrame is a selected extraction of owner-controlled portable Rust components.
-This repository does not redistribute the source project's private product,
-chip/board implementations, original visual resources, binary dumps or vendor
-software. The selection carries regression tests and changes package/import
-names. A generic display driver remains; the extracted board initialization
-profile does not.
+MoteFrame began as a selected extraction of owner-controlled portable Rust
+components. Its portable crates carry regression tests and use the MoteFrame
+package and import names. The separate [device workspace](devices/README.md)
+includes the selected FR8029D and Wattch 5 first-party device source.
 
 The owner authorized publication of the selected first-party code under
-Apache-2.0. The canonical attribution notice is NOTICE; the full license is
-LICENSE. Both files accompany every component. Redistribution, including
+Apache-2.0. The canonical attribution notice is NOTICE and the full license is
+LICENSE. The portable crates carry their own copies. Redistribution, including
 commercial products, follows Apache-2.0 section 4. No additional license
 restriction is imposed by this provenance document.
 
-Excluded private material is not relicensed. Dependencies retain their original
-license choices; the first-party Apache-2.0 choice does not relicense them.
+Dependencies and redistributed fonts retain their original licenses. See the
+[font notice](devices/designs/wattch5-retro-parity/FONT-NOTICE.md) and the
+[upstream FreeRTOS-Kernel license](https://github.com/FreeRTOS/FreeRTOS-Kernel/blob/V11.2.0/LICENSE.md)
+for the separately fetched optional kernel.
 
 Direct upstream dependencies are:
 
@@ -27,6 +27,5 @@ Direct upstream dependencies are:
   used directly by the RGB565 driver. Already present in the original lockfile.
   <https://github.com/embedded-graphics/embedded-graphics>
 
-Dependencies are referenced through Cargo, not copied into this tree. The locked
-transitive dependency graph is audited by cargo-deny. Each dependency retains
-its own copyright notices and license terms. See Cargo.lock for exact versions.
+The root workspace's locked dependency graph is audited by cargo-deny. See its
+Cargo.lock and the independent device Cargo.lock files for exact versions.

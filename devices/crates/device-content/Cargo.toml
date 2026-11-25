@@ -1,0 +1,39 @@
+[package]
+name = "device-content"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.96.0"
+publish = false
+
+[workspace]
+
+[features]
+default = []
+phone = []
+companion-radio = []
+weather = ["dep:device-models", "device-models/weather"]
+contacts = []
+memo = []
+media = []
+gimbal = []
+find = []
+notifications = ["dep:device-models", "device-models/notifications"]
+wallet = []
+watchface = []
+
+[dependencies]
+device-models = { version = "=0.1.0", path = "../device-models", default-features = false, optional = true }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "deny"
+missing_debug_implementations = "deny"
+
+[lints.clippy]
+pedantic = { level = "deny", priority = -1 }
+unwrap_used = "deny"
+expect_used = "deny"
+todo = "deny"
+dbg_macro = "deny"
+undocumented_unsafe_blocks = "deny"
+module_name_repetitions = "allow"

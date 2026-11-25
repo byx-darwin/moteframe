@@ -1,0 +1,20 @@
+{
+  "description": "Additional assertion-level test-strength probes, after initial missing-API RED. Temporary guard removals restored byte-for-byte in finally. These are not claims that source was originally written after every assertion-level failure.",
+  "probes": [
+    {
+      "test": "test_should_not_allocate_a_successful_job_without_real_backend",
+      "red_exit": 101,
+      "assertion_failure": true
+    },
+    {
+      "test": "test_should_gate_all_events_on_start_response_and_ack_one_terminal_event",
+      "red_exit": 101,
+      "assertion_failure": true
+    },
+    {
+      "test": "test_should_count_each_actual_sample_once_using_inclusive_upper_bounds",
+      "red_exit": 101,
+      "assertion_failure": true
+    }
+  ]
+}

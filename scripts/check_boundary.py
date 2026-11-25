@@ -72,6 +72,43 @@ SCRIPTS = {
     "scripts/check_assets_input.py", "scripts/probes/assets_input.rs", "scripts/tests/test_assets_input.py",
 }
 BINARY_SUFFIXES = {".bin", ".lib", ".a", ".elf", ".hex", ".pdf", ".doc", ".docx", ".png", ".jpg", ".zip", ".7z", ".rar", ".pem", ".key"}
+DEVICE_FIRMWARE = {"fr8029d-bringup", "wattch5-bringup", "wattch5-candidate", "wattch5-product"}
+DEVICE_CRATES = {
+    "ble-controller", "ble-host-trouble", "device-actions", "device-application",
+    "device-assets", "device-ble", "device-config-store", "device-configuration",
+    "device-connection", "device-content", "device-content-service", "device-core",
+    "device-health", "device-health-service", "device-history-service",
+    "device-history-store", "device-job-store", "device-maintenance",
+    "device-maintenance-service", "device-models", "device-moteframe", "device-motion",
+    "device-motion-service", "device-object-service", "device-object-store",
+    "device-property-store", "device-protocol", "device-runtime", "device-services",
+    "device-storage", "device-stream", "device-time-store", "device-ui",
+    "device-wellness", "device-wellness-service",
+}
+DEVICE_ARTIFACT_DIRS = {
+    "target", "output", "__pycache__", "evidence", "vendor", "vendor-sdk",
+    "captures", "dumps", "stock", "secrets", "backups",
+}
+DEVICE_TOP_LEVEL = {
+    "devices/.gitignore", "devices/Cargo.toml", "devices/Cargo.lock", "devices/README.md",
+    "devices/scripts/ble_connect.swift",
+    "devices/docs/superpowers/plans/2026-11-25-fr8029d-event-driven-runtime.md",
+}
+DEVICE_SOURCE_SUFFIXES = {
+    ".rs", ".toml", ".lock", ".s", ".py", ".c", ".h", ".md", ".json", ".tcl",
+    ".x", ".cfg", ".mjs", ".html", ".txt", ".css", ".ld", ".js", ".sh",
+}
+# Synthetic parser and store test inputs, never production assets or images.
+DEVICE_FIXTURES = {
+    "devices/firmware/wattch5-product/tests/fixtures/legacy_health_metadata.bin",
+    "devices/firmware/wattch5-bringup/profiles/legacy-lab-test.profile",
+    "devices/drivers/resource-archive/tests/fixtures/absent-distance.zlib",
+} | {
+    f"devices/drivers/resource-archive/tests/fixtures/{name}.{extension}"
+    for name in ("distance512", "dynamic", "fixed", "multiple", "stored")
+    for extension in ("raw", "zlib")
+}
+DEVICE_BUILD_DIRS = {"devices/target"} | {f"devices/firmware/{name}/target" for name in DEVICE_FIRMWARE}
 
 
 def contained(path, root):
@@ -83,8 +120,32 @@ def contained(path, root):
         return False
 
 
+def allowed_device_source(relative):
+    if relative in DEVICE_TOP_LEVEL or relative in DEVICE_FIXTURES:
+        return True
+    path = Path(relative)
+    parts = path.parts
+    if len(parts) < 4 or parts[0] != "devices":
+        return False
+    if any(part.startswith(".") or part.lower() in DEVICE_ARTIFACT_DIRS for part in parts):
+        return False
+    section, package = parts[1:3]
+    allowed_package = (
+        (section == "crates" and package in DEVICE_CRATES)
+        or (section == "firmware" and package in DEVICE_FIRMWARE)
+        or (section == "boards" and package == "wattch5")
+        or (section == "platforms" and package == "syd881x")
+        or (section == "drivers" and package in {"bitbang-i2c", "display", "resource-archive", "spi-nor", "touch"})
+        or (section == "examples" and package in {"wattch5-ui", "wattch5-retro-ui", "wattch5-parity-ui"})
+        or (section == "designs" and package == "wattch5-retro-parity")
+    )
+    return allowed_package and (
+        path.suffix.lower() in DEVICE_SOURCE_SUFFIXES or path.name in {"LICENSE", "NOTICE", "COPYING"}
+    )
+
+
 def allowed(relative):
-    if relative in ROOT_FILES or relative in SCRIPTS:
+    if relative in ROOT_FILES or relative in SCRIPTS or allowed_device_source(relative):
         return True
     path = Path(relative)
     parts = path.parts
@@ -106,7 +167,9 @@ def validate_files(root):
                 directories.remove(name)
             elif name == "__pycache__" or (base == root and name in {".git", "target", ".superpowers"}):
                 directories.remove(name)
-            elif path.relative_to(root).as_posix() in {"examples/ui-low-memory/target", "examples/device-foundation/target"}:
+            elif path.relative_to(root).as_posix() in (
+                {"examples/ui-low-memory/target", "examples/device-foundation/target"} | DEVICE_BUILD_DIRS
+            ):
                 directories.remove(name)
         for name in files:
             path = base / name
@@ -117,6 +180,8 @@ def validate_files(root):
             if relative == ".git":  # Root Git worktree pointer; never a distribution input.
                 continue
             if name == ".DS_Store" or path.suffix == ".pyc":
+                continue
+            if allowed_device_source(relative):
                 continue
             if path.suffix.lower() in BINARY_SUFFIXES:
                 errors.append("binary/resource: " + relative)
@@ -214,7 +279,7 @@ def main():
         for error in errors:
             print(error, file=sys.stderr)
         return 1
-    print("Portable source allowlist and standalone dependency boundary passed.")
+    print("Portable dependency boundary and device source policy passed.")
     return 0
 
 

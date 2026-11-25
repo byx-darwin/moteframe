@@ -1,0 +1,23 @@
+[package]
+name = "device-config-store"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[features]
+default = []
+heart-rate = ["device-configuration/heart-rate"]
+sport = ["device-configuration/sport"]
+wellbeing = ["device-configuration/wellbeing"]
+
+[dependencies]
+device-storage.workspace = true
+device-services.workspace = true
+device-configuration = { path = "../device-configuration", version = "=0.1.0", default-features = false }
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+device-protocol = { path = "../device-protocol", version = "=0.1.0" }

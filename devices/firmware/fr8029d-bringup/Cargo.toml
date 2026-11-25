@@ -1,0 +1,72 @@
+[package]
+name = "fr8029d-bringup"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.96.0"
+publish = false
+
+[workspace]
+
+[dependencies]
+ble-controller = { path = "../../crates/ble-controller", version = "=0.1.0", default-features = false, optional = true }
+ble-host-trouble = { path = "../../crates/ble-host-trouble", version = "=0.1.0", default-features = false, optional = true }
+critical-section = { version = "=1.2.0", default-features = false, features = ["restore-state-bool"], optional = true }
+embassy-sync = { version = "=0.8.0", default-features = false, optional = true }
+embassy-time-driver = { version = "=0.2.2", default-features = false, features = ["tick-hz-1_000_000"], optional = true }
+moteframe-ble = { path = "../../../crates/moteframe-ble", version = "=0.2.0", default-features = false, optional = true }
+
+[dev-dependencies]
+critical-section = { version = "=1.2.0", default-features = false, features = ["std"] }
+embassy-time = { version = "=0.5.1", default-features = false, features = ["std", "generic-queue-8"] }
+
+[features]
+probe = []
+ram-probe = ["probe"]
+ble-adv-probe = []
+ble-adv-cold = ["ble-adv-probe"]
+ble-adv-cold-xip = ["ble-adv-cold"]
+ble-connect-probe = ["ble-adv-cold"]
+ble-gatt-probe = ["dep:ble-controller", "dep:ble-host-trouble", "dep:embassy-sync", "dep:moteframe-ble"]
+ble-gatt-board = ["ble-connect-probe", "ble-gatt-probe", "dep:critical-section", "dep:embassy-time-driver"]
+ble-gatt-xip = ["ble-gatt-board", "ble-adv-cold-xip"]
+ble-gatt-freertos = ["ble-gatt-board"]
+
+[[bin]]
+name = "fr8029d-bringup"
+path = "src/main.rs"
+required-features = ["probe"]
+test = false
+bench = false
+
+[[bin]]
+name = "fr8029d-ble-adv"
+path = "src/ble_adv_probe.rs"
+required-features = ["ble-adv-probe"]
+test = false
+bench = false
+
+[[test]]
+name = "gatt"
+required-features = ["ble-gatt-probe"]
+
+[[test]]
+name = "gatt-board-time"
+path = "src/gatt_board_time.rs"
+required-features = ["ble-gatt-probe"]
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+missing_docs = "warn"
+missing_debug_implementations = "warn"
+
+[lints.clippy]
+pedantic = { level = "deny", priority = -1 }
+unwrap_used = "deny"
+expect_used = "deny"
+undocumented_unsafe_blocks = "deny"

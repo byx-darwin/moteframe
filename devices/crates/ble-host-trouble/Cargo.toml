@@ -1,0 +1,20 @@
+[package]
+name = "ble-host-trouble"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+ble-controller.workspace = true
+trouble-host.workspace = true
+# Cortex-M0 has no CAS; use the final board critical-section implementation.
+portable-atomic.workspace = true
+
+[dev-dependencies]
+embassy-sync.workspace = true
+embassy-time = { workspace = true, features = ["std", "generic-queue-8"] }
+critical-section = { workspace = true, features = ["std"] }
+
+[lints]
+workspace = true

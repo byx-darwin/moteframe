@@ -1,0 +1,16 @@
+[package]
+name = "device-moteframe"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+[dependencies]
+device-core = { workspace = true, features = ["native-colors"] }
+device-display.workspace = true
+embedded-hal.workspace = true
+embedded-graphics.workspace = true
+moteframe-core = { path = "../../../crates/moteframe-core", version = "=0.2.0", default-features = false }
+moteframe-display = { path = "../../../crates/moteframe-display", version = "=0.2.0", default-features = false }
+moteframe-storage = { path = "../../../crates/moteframe-storage", version = "=0.2.0", default-features = false }
+[lints]
+workspace = true

@@ -1,0 +1,111 @@
+[package]
+name = "wattch5-product"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.96.0"
+publish = false
+build = "build.rs"
+
+[workspace]
+
+[dependencies]
+moteframe-ble = { path = "../../../crates/moteframe-ble", version = "=0.2.0", default-features = false, optional = true }
+syd881x-runtime = { path = "../../platforms/syd881x/runtime", version = "0.1.0", default-features = false }
+device-application = { version = "=0.1.0", path = "../../crates/device-application", default-features = false, optional = true }
+device-protocol = { path = "../../crates/device-protocol", version = "0.1.0" }
+device-services = { path = "../../crates/device-services", version = "0.1.0" }
+
+device-runtime = { path = "../../crates/device-runtime", version = "=0.1.0", default-features = false, optional = true }
+device-core = { path = "../../crates/device-core", version = "=0.1.0", default-features = false, optional = true }
+device-ui = { path = "../../crates/device-ui", version = "=0.1.0", default-features = false, optional = true }
+device-configuration = { path = "../../crates/device-configuration", version = "=0.1.0", default-features = false, optional = true, features = ["settings"] }
+device-storage = { path = "../../crates/device-storage", version = "=0.1.0", default-features = false, optional = true }
+device-property-store = { path = "../../crates/device-property-store", version = "=0.1.0", default-features = false, optional = true, features = ["settings"] }
+device-time-store = { path = "../../crates/device-time-store", version = "=0.1.0", default-features = false, optional = true }
+device-config-store = { path = "../../crates/device-config-store", version = "=0.1.0", default-features = false, optional = true }
+device-object-store = { path = "../../crates/device-object-store", version = "=0.1.0", default-features = false, optional = true }
+device-history-store = { path = "../../crates/device-history-store", version = "=0.1.0", default-features = false, optional = true }
+device-job-store = { path = "../../crates/device-job-store", version = "=0.1.0", default-features = false, optional = true }
+wattch5-parity-ui-demo = { path = "../../examples/wattch5-parity-ui", version = "=0.1.0", default-features = false, optional = true }
+
+device-connection = { path = "../../crates/device-connection", version = "=0.1.0", default-features = false, optional = true }
+device-history-service = { path = "../../crates/device-history-service", version = "=0.1.0", default-features = false, optional = true }
+device-maintenance-service = { path = "../../crates/device-maintenance-service", version = "=0.1.0", default-features = false, optional = true, features = ["device-jobs"] }
+
+ble-host-trouble = { path = "../../crates/ble-host-trouble", version = "=0.1.0", default-features = false, optional = true }
+embassy-sync = { version = "=0.8.0", default-features = false, optional = true }
+
+device-health = { path = "../../crates/device-health", version = "=0.1.0", default-features = false, optional = true }
+device-health-service = { path = "../../crates/device-health-service", version = "=0.1.0", default-features = false, optional = true }
+
+[dev-dependencies]
+ble-controller = { path = "../../crates/ble-controller", version = "=0.1.0", default-features = false }
+embassy-time = { version = "=0.5.1", default-features = false, features = ["std", "generic-queue-8"] }
+critical-section = { version = "=1.2.0", default-features = false, features = ["std"] }
+
+[features]
+legacy-health = ["runtime", "blood-pressure", "oxygen", "glucose", "dep:device-health", "dep:device-health-service"]
+blood-pressure = ["dep:device-application", "device-application/blood-pressure", "device-health?/blood-pressure", "device-health-service?/blood-pressure"]
+oxygen = ["dep:device-application", "device-application/oxygen", "device-health?/oxygen", "device-health-service?/oxygen"]
+glucose = ["dep:device-application", "device-application/glucose", "device-health?/glucose", "device-health-service?/glucose"]
+runtime-trouble = ["dep:moteframe-ble", "runtime", "dep:ble-host-trouble", "dep:embassy-sync"]
+default = ["commercial"]
+runtime = ["dep:device-connection", "dep:device-history-service", "dep:device-maintenance-service", "dep:device-runtime", "dep:device-core", "dep:device-ui", "dep:device-configuration", "dep:device-storage", "dep:device-property-store", "dep:device-time-store", "dep:device-config-store", "dep:device-object-store", "dep:device-history-store", "dep:device-job-store", "dep:wattch5-parity-ui-demo"]
+commercial = []
+development = []
+factory = []
+raw-data = ["dep:device-application", "device-application/service-routing", "device-application/raw-data"]
+self-test = ["dep:device-application", "device-application/service-routing", "device-application/self-test"]
+engineering = ["dep:device-application", "device-application/service-routing", "device-application/engineering"]
+factory-config = ["dep:device-application", "device-application/service-routing", "device-application/factory-config"]
+arm-image = []
+wattch5-source = ["service-routing", "objects", "device-jobs", "dep:device-application", "time", "device", "system", "profile", "settings", "reminders", "find", "history", "heart-rate", "sleep", "sport", "activity", "blood-pressure", "oxygen", "glucose", "temperature", "notifications", "watchface", "weather", "media", "limits"]
+time = ["dep:device-application", "device-application/time"]
+device = ["dep:device-application", "device-application/device"]
+system = ["dep:device-application", "device-application/system"]
+profile = ["dep:device-application", "device-application/profile"]
+settings = ["dep:device-application", "device-application/settings"]
+reminders = ["dep:device-application", "device-application/reminders"]
+find = ["dep:device-application", "device-application/find"]
+history = ["dep:device-application", "device-application/history"]
+heart-rate = ["dep:device-application", "device-application/heart-rate", "device-config-store?/heart-rate"]
+sleep = ["dep:device-application", "device-application/sleep"]
+sport = ["dep:device-application", "device-application/sport", "device-config-store?/sport"]
+activity = ["dep:device-application", "device-application/activity"]
+temperature = ["dep:device-application", "device-application/temperature"]
+notifications = ["dep:device-application", "device-application/notifications"]
+watchface = ["dep:device-application", "device-application/watchface"]
+weather = ["dep:device-application", "device-application/weather"]
+media = ["dep:device-application", "device-application/media"]
+limits = ["dep:device-application", "device-application/limits"]
+
+service-routing = ["dep:device-application", "device-application/service-routing"]
+
+objects = ["dep:device-application", "device-application/objects"]
+
+device-jobs = ["dep:device-application", "device-application/device-jobs"]
+
+[[bin]]
+name = "wattch5-product"
+path = "src/main.rs"
+test = false
+bench = false
+required-features = ["arm-image"]
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[lints.clippy]
+undocumented_unsafe_blocks = "deny"
+unwrap_used = "deny"
+expect_used = "deny"
+
+[[test]]
+name = "runtime_settings"
+required-features = ["runtime"]

@@ -21,10 +21,10 @@ such as `fix(display): preserve failure after cleanup`.
 
 First-party contributions are accepted under Apache-2.0. Preserve applicable
 copyright and source notices and mark modified files as required by section 4.
-Every crate must carry the root LICENSE and NOTICE; package auditing rejects a
-missing notice or an unintended alternative first-party license file. Commercial
-redistribution must carry the applicable notice and license too. Dependencies
-retain their respective licenses.
+Each portable MoteFrame crate must carry the root LICENSE and NOTICE. The device
+workspace uses the root license and notice for first-party source and includes
+the applicable third-party notices for redistributed assets. Commercial
+redistribution must carry the applicable notices and licenses.
 
 Cargo registry publication is disabled in every package. GitHub source publication,
 crates.io uploads and releases are separate owner decisions. Passing CI does not

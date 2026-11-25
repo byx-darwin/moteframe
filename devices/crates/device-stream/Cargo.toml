@@ -1,0 +1,17 @@
+[package]
+name = "device-stream"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[features]
+default = []
+raw-data = ["dep:device-maintenance", "device-protocol/raw-data"]
+
+[dependencies]
+device-protocol = { version = "=0.1.0", path = "../device-protocol" }
+device-maintenance = { version = "=0.1.0", path = "../device-maintenance", default-features = false, features = ["raw-data"], optional = true }
+
+[lints]
+workspace = true
