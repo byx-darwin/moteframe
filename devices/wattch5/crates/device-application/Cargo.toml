@@ -10,7 +10,6 @@ device-connection = { version = "=0.1.0", path = "../device-connection", default
 device-motion = { version = "=0.1.0", path = "../device-motion", default-features = false, optional = true }
 device-wellness = { version = "=0.1.0", path = "../device-wellness", default-features = false, optional = true }
 device-maintenance = { version = "=0.1.0", path = "../device-maintenance", default-features = false, optional = true }
-device-stream = { version = "=0.1.0", path = "../device-stream", default-features = false, optional = true }
 device-health = { version = "=0.1.0", path = "../device-health", default-features = false, optional = true }
 device-actions = { version = "=0.1.0", path = "../device-actions", default-features = false, optional = true }
 device-history-service = { version = "=0.1.0", path = "../device-history-service", default-features = false, optional = true }
@@ -41,7 +40,7 @@ objects = ["dep:device-object-service"]
 device-jobs = ["dep:device-maintenance-service", "device-maintenance-service/device-jobs"]
 system = ["dep:device-actions", "device-actions/system"]
 history = ["dep:device-history-service"]
-raw-data = ["device-services/raw-data", "device-protocol/raw-data", "dep:device-stream", "device-stream/raw-data", "device-maintenance-service?/raw-data"]
+raw-data = ["device-services/raw-data", "device-protocol/raw-data", "device-maintenance-service?/raw-data"]
 configuration = ["dep:device-configuration"]
 device = ["configuration", "device-configuration/device", "dep:device-models", "device-models/device"]
 time = ["configuration", "device-configuration/time"]

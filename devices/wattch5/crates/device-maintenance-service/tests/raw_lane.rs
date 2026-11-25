@@ -2,7 +2,7 @@
 #![cfg(feature = "raw-data")]
 use device_maintenance::{Error, raw::DataLane};
 use device_protocol::{DataKind, SharedDataLane};
-use device_stream::RawLaneAdapter;
+use device_maintenance_service::RawLaneAdapter;
 #[test]
 fn test_should_share_history_raw_stream_and_message_spaces_and_require_actual_drain() {
     let owner = SharedDataLane::new(core::num::NonZeroU64::MIN);
@@ -58,7 +58,7 @@ fn test_should_encode_real_batch_metadata_using_frozen_event_crc() {
         samples: &samples,
     };
     let mut out = [0; 128];
-    let n = device_stream::encode_raw_batch(&batch, &mut out, 128, 6)
+    let n = device_maintenance_service::encode_raw_batch(&batch, &mut out, 128, 6)
         .unwrap_or_else(|e| panic!("{e:?}"));
     assert_eq!(n, 52);
     assert_eq!(&out[48..52], &[0xd7, 0x59, 0xd0, 0x33]);

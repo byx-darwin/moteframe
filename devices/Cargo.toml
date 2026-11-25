@@ -9,7 +9,6 @@ members = [
     "drivers/resource-archive",
 
     "wattch5/crates/device-application",
-    "wattch5/crates/device-stream",
     "wattch5/crates/device-services",
     "wattch5/crates/device-connection",
     "wattch5/crates/device-motion",

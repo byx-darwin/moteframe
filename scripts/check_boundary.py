@@ -83,7 +83,7 @@ WATTCH5_CRATES = {
     "device-maintenance-service", "device-models", "device-moteframe", "device-motion",
     "device-motion-service", "device-object-service", "device-object-store",
     "device-property-store", "device-protocol", "device-runtime", "device-services",
-    "device-storage", "device-stream", "device-time-store", "device-ui",
+    "device-storage", "device-time-store", "device-ui",
     "device-wellness", "device-wellness-service",
 }
 DEVICE_ARTIFACT_DIRS = {

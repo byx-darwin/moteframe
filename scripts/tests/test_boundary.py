@@ -117,7 +117,7 @@ class BoundaryTests(unittest.TestCase):
             "devices/crates/ble-controller/src/lib.rs",
             "devices/crates/ble-host-trouble/Cargo.toml",
             "devices/wattch5/crates/device-core/src/lib.rs",
-            "devices/wattch5/crates/device-stream/tests/raw.rs",
+            "devices/wattch5/crates/device-maintenance-service/tests/raw_lane.rs",
         ]
         for path in approved:
             self.write(path, "")

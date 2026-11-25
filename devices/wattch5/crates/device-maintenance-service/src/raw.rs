@@ -6,8 +6,12 @@ use device_maintenance::{
     Authority, Capability, Profile,
     raw::{Config, DataLane, RawEngine, Source, Started, StopSummary},
 };
-use device_protocol::{Frame, Header, Kind, ModuleEntry, RawBatch};
+use device_protocol::{Frame, Header, Kind, ModuleEntry};
 use device_services::{Reason, ServiceHandler, SessionError, Status};
+
+mod lane;
+pub use lane::{RawLaneAdapter, encode_raw_batch};
+
 /// End the SAME actual connection-wide DATA owner before disconnecting the engine. All producers
 /// must discard old queued work; this is not normal STOP release and must never reopen that owner.
 pub trait DataSessionCloser {
@@ -382,21 +386,7 @@ impl<'a, const N: usize> RawActor<'a, N> {
         *begun = true;
         let message = batch.message_id;
         let stream = batch.stream_id;
-        let wire = RawBatch {
-            capture_id: batch.capture_id,
-            stream_id: stream,
-            batch_seq: batch.batch_seq,
-            first_sample: batch.first_sample,
-            t0_mono_us: batch.t0_mono_us,
-            period_ns: batch.period_ns,
-            config_rev: batch.config_rev,
-            dropped_total: batch.dropped_total,
-            sample_count: batch.sample_count,
-            quality_flags: batch.quality_flags,
-            samples: batch.samples,
-        };
-        let length = wire
-            .encode(&mut state.bytes, self.data_max, state.stride)
+        let length = encode_raw_batch(&batch, &mut state.bytes, self.data_max, state.stride)
             .map_err(|_| Error::Invalid)?;
         let end = length.min(frame_max - 10);
         let header = Header {

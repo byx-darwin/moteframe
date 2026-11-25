@@ -140,7 +140,6 @@ dependencies = [
  "device-protocol",
  "device-services",
  "device-storage",
- "device-stream",
  "device-wellness",
  "device-wellness-service",
 ]
@@ -389,14 +388,6 @@ dependencies = [
 name = "device-storage"
 version = "0.1.0"
 dependencies = [
- "device-protocol",
-]
-
-[[package]]
-name = "device-stream"
-version = "0.1.0"
-dependencies = [
- "device-maintenance",
  "device-protocol",
 ]
 
