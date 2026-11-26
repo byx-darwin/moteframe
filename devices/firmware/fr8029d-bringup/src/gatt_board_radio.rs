@@ -33,7 +33,7 @@ use {super::gatt_board_wake, fr8029d_bringup::wake::RadioDeadline};
 #[cfg(feature = "ble-gatt-dle")]
 use {
     super::connect_probe::{HeldRx, RxBuffer},
-    ble_controller::DataLength,
+    ble_controller::{DataLength, LengthResponseStatus},
     core::sync::atomic::AtomicU32,
     fr8029d_bringup::connection::DataAirtime,
 };
@@ -217,7 +217,10 @@ mod tests {
         ready_rx(0, 3, 0, 127_900, &response);
         radio.connection_ended(127_900)?;
         assert!(matches!(radio.poll(), Ok(Some(LinkEvent::Connected(..)))));
-        assert_eq!(radio.data_length_response_clock(), None);
+        assert_eq!(
+            radio.length_response_status()?,
+            LengthResponseStatus::Pending
+        );
         let transmit = |radio: &mut Radio, token| {
             radio.transmit_payload(token, FrameKind::Control, false, &request)
         };
@@ -232,7 +235,10 @@ mod tests {
         ready_rx(1, 3, RX_REPEATED, 127_989, &response);
         ready_rx(2, 2, 0, 127_990, &response);
         ready_rx(3, 3, 0, 127_991, &[0x11, 0x16, 0x1a]);
-        assert_eq!(radio.data_length_response_clock(), None);
+        assert_eq!(
+            radio.length_response_status()?,
+            LengthResponseStatus::Pending
+        );
         ready_rx(4, 3, 0, 127_999, &[0x07, 0x14]);
         ready_rx(5, 3, 0, 128_001, &response);
         // Poll the deadline before EVENT_END while RX_READY gives the CPU ownership.
@@ -240,28 +246,67 @@ mod tests {
         radio.service_backpressure()?;
         assert!(radio.pending.is_some());
         assert_eq!(radio.data_length_clock(), Some(128_002));
-        assert_eq!(radio.data_length_response_clock(), Some(127_999));
+        assert_eq!(
+            radio.length_response_status()?,
+            LengthResponseStatus::Received(127_999)
+        );
         COMPLETED_SLOT.set(Some(radio.slot));
         radio.service_backpressure()?;
         assert!(radio.pending.is_none());
         assert_eq!(transmit(&mut radio, 2), Ok(TxAdmission::Busy));
-        assert_eq!(radio.data_length_response_clock(), Some(127_999));
+        assert_eq!(
+            radio.length_response_status()?,
+            LengthResponseStatus::Received(127_999)
+        );
         while !radio.events.is_empty() {
             assert!(radio.poll()?.is_some());
         }
-        assert_eq!(radio.data_length_response_clock(), Some(127_999));
+        assert_eq!(
+            radio.length_response_status()?,
+            LengthResponseStatus::Received(127_999)
+        );
 
         let tx = PACKET_RAM + usize::from(TX_OFFSET);
         set_halfword(tx, halfword(tx) | TX_DONE);
         radio.connection_ended(128_005)?;
         assert_eq!(transmit(&mut radio, 2), Ok(TxAdmission::Committed));
-        assert_eq!(radio.data_length_response_clock(), None);
+        assert_eq!(
+            radio.length_response_status()?,
+            LengthResponseStatus::Pending
+        );
         ready_rx(0, 3, 0, 128_010, &[0x0d, 0x1a]);
         radio.connection_ended(128_012)?;
-        assert_eq!(radio.data_length_response_clock(), Some(128_010));
+        assert_eq!(
+            radio.length_response_status()?,
+            LengthResponseStatus::Received(128_010)
+        );
         radio.stop()?;
-        assert_eq!(radio.data_length_response_clock(), None);
+        assert_eq!(
+            radio.length_response_status()?,
+            LengthResponseStatus::Pending
+        );
         EVENT_CLOCK.set(None);
+        Ok(())
+    }
+
+    #[cfg(all(feature = "ble-gatt-dle", not(target_arch = "arm")))]
+    #[test]
+    fn length_deadline_surfaces_invalid_ready_descriptor_offset() -> Result<(), u32> {
+        use super::super::EVENT_CLOCK;
+        use super::*;
+        use fr8029d_bringup::advertising::RX_OFFSET;
+        let mut radio = connected_fixture()?;
+        let link = radio.link.as_mut().ok_or(21_u32)?;
+        link.length_response = LengthResponse::Waiting;
+        radio.initialized = true;
+        EVENT_CLOCK.set(Some(link.event.start.coarse - 3));
+        radio.service_backpressure()?;
+        EVENT_CLOCK.set(None);
+        assert!(radio.pending.is_some());
+        ready_rx(0, 3, 0, 127_999, &[0x07, 0x14]);
+        let rx = PACKET_RAM + usize::from(RX_OFFSET);
+        set_halfword(rx + 0x14, 0xffff);
+        assert_eq!(radio.length_response_status(), Err(17));
         Ok(())
     }
 
@@ -304,6 +349,10 @@ mod tests {
         assert!(matches!(radio.poll(), Ok(Some(LinkEvent::Connected(..)))));
         assert_eq!(radio.events.len(), 1);
         radio.expire_link(32 * 501)?;
+        assert_eq!(
+            radio.length_response_status()?,
+            LengthResponseStatus::Disconnected(0x08)
+        );
         let frame = LinkFrame::new(FrameKind::Start, &[0, 0, 4, 0]).map_err(|_| 20_u32)?;
         assert_eq!(radio.transmit(1, frame), Ok(TxAdmission::Busy));
         assert_eq!(radio.poll(), Ok(Some(LinkEvent::Disconnected(0x08))));
@@ -1187,17 +1236,29 @@ impl LinkBackend for Radio {
     }
 
     #[cfg(feature = "ble-gatt-dle")]
-    fn data_length_response_clock(&self) -> Option<u32> {
-        match self.link.as_ref()?.length_response {
+    fn length_response_status(&self) -> Result<LengthResponseStatus, u32> {
+        let Some(link) = self.link.as_ref() else {
+            return Ok(match self.events.front() {
+                Some(BoardEvent::Disconnected(reason)) => {
+                    LengthResponseStatus::Disconnected(*reason)
+                }
+                _ => LengthResponseStatus::Pending,
+            });
+        };
+        let time = match link.length_response {
             LengthResponse::Received(time) => Some(time),
-            LengthResponse::Waiting if self.pending.is_some() => Some(
-                self.receiver
-                    .as_ref()?
-                    .ready_time(is_length_response)?
-                    .coarse,
-            ),
+            LengthResponse::Waiting if self.pending.is_some() => self
+                .receiver
+                .as_ref()
+                .ok_or(21_u32)?
+                .ready_time(is_length_response)?
+                .map(|time| time.coarse),
             _ => None,
-        }
+        };
+        Ok(time.map_or(
+            LengthResponseStatus::Pending,
+            LengthResponseStatus::Received,
+        ))
     }
 
     #[cfg(feature = "ble-gatt-dle")]

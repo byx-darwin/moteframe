@@ -111,16 +111,21 @@ impl Receiver {
 
     /// Observe CPU-owned descriptors before `EVENT_END` without consuming them.
     #[cfg(feature = "ble-gatt-dle")]
-    pub(super) fn ready_time(&self, matches: impl Fn(&HeldRx) -> bool) -> Option<PacketTime> {
+    pub(super) fn ready_time(
+        &self,
+        matches: impl Fn(&HeldRx) -> bool,
+    ) -> Result<Option<PacketTime>, u32> {
         let mut index = self.next;
         for _ in 0..RX_COUNT {
-            let packet = self.ready_link(index).ok()??;
+            let Some(packet) = self.ready_link(index)? else {
+                break;
+            };
             if matches(&packet) {
-                return Some(packet.time);
+                return Ok(Some(packet.time));
             }
             index = (index + 1) % RX_COUNT;
         }
-        None
+        Ok(None)
     }
 
     /// Takes ownership of a data buffer without copying it into the event queue.

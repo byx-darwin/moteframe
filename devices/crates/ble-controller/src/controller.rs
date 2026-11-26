@@ -10,7 +10,7 @@ use crate::OwnedQueue;
 use crate::dle_queues::{EventQueue, TxFragment, TxQueue};
 #[cfg(feature = "data-length")]
 use crate::{
-    DataLength,
+    DataLength, LengthResponseStatus,
     data_length::{LengthState, Procedure},
 };
 /// Bluetooth version identity supplied by the integrator, never a product service.
@@ -480,25 +480,39 @@ impl<B: LinkBackend> Controller<B> {
     }
 
     #[cfg(feature = "data-length")]
-    fn late_length_response(&self, payload: &[u8]) -> bool {
-        let Procedure::Waiting(start) = self.lengths.procedure else {
-            return false;
+    fn length_end_reason(&self, start: u32) -> Result<Option<u8>, ControllerError<B::Error>> {
+        let arrival = match self
+            .backend
+            .length_response_status()
+            .map_err(ControllerError::Backend)?
+        {
+            LengthResponseStatus::Disconnected(reason) => return Ok(Some(reason)),
+            LengthResponseStatus::Received(time) => Some(time),
+            LengthResponseStatus::Pending => self.backend.data_length_clock(),
         };
-        let [opcode, parameter, ..] = payload else {
-            return false;
-        };
-        DataLength::is_response_header(*opcode, *parameter, payload.len())
-            && self
-                .backend
-                .data_length_response_clock()
-                .or_else(|| self.backend.data_length_clock())
-                .is_some_and(|arrival| Self::length_elapsed(start, arrival) > Self::LENGTH_TIMEOUT)
+        Ok(arrival
+            .filter(|&time| Self::length_elapsed(start, time) > Self::LENGTH_TIMEOUT)
+            .map(|_| 0x22))
+    }
+
+    #[cfg(feature = "data-length")]
+    fn received_length_end_reason(
+        &self,
+        payload: &[u8],
+    ) -> Result<Option<u8>, ControllerError<B::Error>> {
+        if let Procedure::Waiting(start) = self.lengths.procedure
+            && let [opcode, parameter, ..] = payload
+            && DataLength::is_response_header(*opcode, *parameter, payload.len())
+        {
+            return self.length_end_reason(start);
+        }
+        Ok(None)
     }
 
     fn receive_control(&mut self, payload: &[u8]) -> Result<(), ControllerError<B::Error>> {
         #[cfg(feature = "data-length")]
-        if self.late_length_response(payload) {
-            return self.end(0x22);
+        if let Some(reason) = self.received_length_end_reason(payload)? {
+            return self.end(reason);
         }
         match payload {
             [0x00, ..] if payload.len() == 12 => self
@@ -788,14 +802,10 @@ impl<B: LinkBackend> Controller<B> {
         #[cfg(feature = "data-length")]
         if let Procedure::Waiting(start) = self.lengths.procedure
             && let Some(now) = self.backend.data_length_clock()
-            && Self::length_elapsed(start, now) >= Self::LENGTH_TIMEOUT
-            && self
-                .backend
-                .data_length_response_clock()
-                .is_none_or(|arrival| Self::length_elapsed(start, arrival) > Self::LENGTH_TIMEOUT)
+            && Self::length_elapsed(start, now) > Self::LENGTH_TIMEOUT
+            && let Some(reason) = self.length_end_reason(start)?
         {
-            // LL response timeout is 40 s, independent of supervision traffic.
-            return self.end(0x22);
+            return self.end(reason);
         }
         if self.connection.is_some() && !self.tx.is_full() {
             self.queue_local_control()?;

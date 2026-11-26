@@ -38,6 +38,19 @@ impl LinkBackend for Backend {
     fn data_length_response_clock(&self) -> Option<u32> {
         self.receipt
     }
+    #[cfg(feature = "data-length")]
+    fn length_response_status(&self) -> Result<LengthResponseStatus, ()> {
+        if self.fail {
+            return Err(());
+        }
+        if let Some(LinkEvent::Disconnected(reason)) = self.events.front() {
+            return Ok(LengthResponseStatus::Disconnected(*reason));
+        }
+        Ok(self.receipt.map_or(
+            LengthResponseStatus::Pending,
+            LengthResponseStatus::Received,
+        ))
+    }
     fn data_length_updated(&mut self, limits: DataLength) {
         self.lengths = Some(limits);
     }
@@ -585,6 +598,9 @@ fn unanswered_length_request_expires_only_after_admission_across_clock_wrap() {
     assert_eq!(core.connection(), Some(id));
     core.backend_mut().clock += 1;
     core.service().unwrap();
+    assert_eq!(core.connection(), Some(id));
+    core.backend_mut().clock += 1;
+    core.service().unwrap();
     assert_eq!(
         core.next_event(),
         Some(ControllerEvent::Disconnected { id, reason: 0x22 })
@@ -618,6 +634,9 @@ fn length_response_in_the_receive_queue_cancels_timeout() {
     core.service().unwrap();
     let token = core.backend_mut().sent[0].0;
     let rsp = LinkFrame::new(FrameKind::Control, &[0x15, 251, 0, 72, 8, 251, 0, 72, 8]).unwrap();
+    core.backend_mut().clock = 128_000;
+    core.service().unwrap();
+    assert_eq!(core.connection(), Some(id));
     core.backend_mut()
         .events
         .extend([LinkEvent::Acknowledged(token), LinkEvent::Received(rsp)]);
@@ -648,7 +667,7 @@ fn length_deadline_disconnects_with_full_host_queues_in_fifo_order() {
         }
         core.service().unwrap();
         core.service().unwrap();
-        core.backend_mut().clock = 128_000;
+        core.backend_mut().clock = 128_001;
         core.service().unwrap();
         assert_eq!(core.connection(), None);
         assert_eq!(core.backend_mut().stops, 1);
@@ -771,10 +790,56 @@ fn length_deadline_ignores_truncated_response() {
     core.backend_mut()
         .events
         .push_back(LinkEvent::Received(truncated));
-    core.backend_mut().clock = 128_000;
+    core.backend_mut().clock = 128_001;
     core.service().unwrap();
     assert_eq!(
         core.next_event(),
         Some(ControllerEvent::Disconnected { id, reason: 0x22 })
     );
+}
+
+#[cfg(feature = "data-length")]
+#[test]
+fn queued_radio_disconnect_wins_over_length_timeout_under_backpressure() {
+    let mut core = connected();
+    let id = core.connection().unwrap();
+    core.backend_mut().lengths = Some(DataLength::LEGACY);
+    core.service().unwrap();
+    core.backend_mut().events.extend([
+        LinkEvent::Received(frame(1)),
+        LinkEvent::Received(frame(2)),
+        LinkEvent::Disconnected(0x08),
+    ]);
+    core.backend_mut().clock = 124_800;
+    core.service().unwrap();
+    core.backend_mut().clock = 128_001;
+    core.service().unwrap();
+    for n in [1, 2] {
+        assert_eq!(
+            core.next_event(),
+            Some(ControllerEvent::Acl {
+                id,
+                frame: frame(n)
+            })
+        );
+    }
+    assert_eq!(
+        core.next_event(),
+        Some(ControllerEvent::Disconnected { id, reason: 0x08 })
+    );
+    core.service().unwrap();
+    assert_eq!(core.next_event(), None);
+    assert_eq!(core.backend_mut().stops, 1);
+}
+
+#[cfg(feature = "data-length")]
+#[test]
+fn length_deadline_propagates_backend_rx_fault() {
+    let mut core = connected();
+    core.backend_mut().lengths = Some(DataLength::LEGACY);
+    core.service().unwrap();
+    core.backend_mut().clock = 128_001;
+    core.backend_mut().fail = true;
+    assert!(matches!(core.service(), Err(ControllerError::Backend(()))));
+    assert_eq!(core.next_event(), None);
 }

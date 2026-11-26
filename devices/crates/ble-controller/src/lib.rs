@@ -17,6 +17,8 @@ mod dle_queues;
 pub use data_length::DataLength;
 mod backend;
 mod controller;
+#[cfg(feature = "data-length")]
+pub use backend::LengthResponseStatus;
 pub use backend::{Advertisement, LinkBackend, LinkEvent, Peer, TxAdmission};
 pub use controller::{ConnectionId, Controller, ControllerError, ControllerEvent, Version};
 mod command;

@@ -83,6 +83,17 @@ pub enum LinkEvent {
     /// Effective TX and RX PHYs, in peripheral order and HCI encoding.
     PhyUpdated(u8, u8),
 }
+/// Radio evidence available before a length response can be delivered to the Host.
+#[cfg(feature = "data-length")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LengthResponseStatus {
+    /// No matching receipt is buffered.
+    Pending,
+    /// Native RX timestamp of the matching response or rejection.
+    Received(u32),
+    /// The radio has already ended this link and queued its disconnect reason.
+    Disconnected(u8),
+}
 /// Radio backend with hardware-assisted timing, retransmission and SN/NESN.
 ///
 /// A radio-only chip needs an additional software link engine implementing this
@@ -121,6 +132,17 @@ pub trait LinkBackend: core::fmt::Debug {
     #[cfg(feature = "data-length")]
     fn data_length_response_clock(&self) -> Option<u32> {
         None
+    }
+    /// Inspect the current link without consuming its queued events. Buffered
+    /// backends can surface a completed disconnect even while Host RX is full.
+    /// # Errors
+    /// Return the backend error when the RX descriptor cannot be inspected.
+    #[cfg(feature = "data-length")]
+    fn length_response_status(&self) -> Result<LengthResponseStatus, Self::Error> {
+        Ok(self.data_length_response_clock().map_or(
+            LengthResponseStatus::Pending,
+            LengthResponseStatus::Received,
+        ))
     }
     /// Apply the effective limits in peripheral order to future radio PDUs.
     fn data_length_updated(&mut self, _limits: crate::DataLength) {}
