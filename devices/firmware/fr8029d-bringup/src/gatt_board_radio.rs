@@ -32,7 +32,9 @@ use {super::gatt_board_wake, fr8029d_bringup::wake::RadioDeadline};
 
 #[cfg(feature = "ble-gatt-dle")]
 use {
-    super::connect_probe::RxBuffer, ble_controller::DataLength, core::sync::atomic::AtomicU32,
+    super::connect_probe::{HeldRx, RxBuffer},
+    ble_controller::DataLength,
+    core::sync::atomic::AtomicU32,
     fr8029d_bringup::connection::DataAirtime,
 };
 
@@ -59,6 +61,7 @@ enum BoardEvent {
         buffer: RxBuffer,
         session: u32,
         rx_two_m: bool,
+        length_response: bool,
     },
     Acknowledged(u32),
     Disconnected(u8),
@@ -113,6 +116,15 @@ fn received_pdu(status: u16, header: u16) -> Option<(FrameKind, bool)> {
         _ => return None,
     };
     Some((kind, status & RX_REPEATED == 0))
+}
+
+#[cfg(feature = "ble-gatt-dle")]
+fn is_length_response(packet: &HeldRx) -> bool {
+    let len = usize::from(packet.header >> 8);
+    packet.link_id == u16::from(LINK_ID)
+        && received_pdu(packet.status, packet.header) == Some((FrameKind::Control, true))
+        && len >= 2
+        && DataLength::is_response_header(packet.payload.byte(0), packet.payload.byte(1), len)
 }
 
 #[cfg(test)]
@@ -170,6 +182,87 @@ mod tests {
             },
         )?);
         Ok(radio)
+    }
+
+    #[cfg(feature = "ble-gatt-dle")]
+    fn ready_rx(index: usize, kind: u8, status: u16, coarse: u32, payload: &[u8]) {
+        use super::*;
+        use fr8029d_bringup::advertising::{RX_OFFSET, RX_WORDS};
+        let rx = PACKET_RAM + usize::from(RX_OFFSET) + index * RX_WORDS * 2;
+        let offset = usize::from(halfword(rx + 0x14));
+        for (i, &byte) in payload.iter().enumerate() {
+            write8(PACKET_RAM + offset + i, byte);
+        }
+        set_halfword(rx + 2, status);
+        set_halfword(
+            rx + 4,
+            u16::from_le_bytes([kind, payload.len().to_le_bytes()[0]]),
+        );
+        for (i, byte) in coarse.to_le_bytes().into_iter().enumerate() {
+            write8(rx + 8 + i, byte);
+        }
+        set_halfword(rx + 0xc, (u16::from(LINK_ID) << 11) | 0x0190);
+        set_halfword(rx, halfword(rx) | 0x8000);
+    }
+
+    #[cfg(all(feature = "ble-gatt-dle", not(target_arch = "arm")))]
+    #[test]
+    fn length_response_clock_follows_the_first_ready_rx_after_commit() -> Result<(), u32> {
+        use super::super::{COMPLETED_SLOT, EVENT_CLOCK};
+        use super::*;
+        let mut radio = connected_fixture()?;
+        let request = [0x14, 251, 0, 0x48, 8, 251, 0, 0x48, 8];
+        let response = [0x15, 251, 0, 0x48, 8, 251, 0, 0x48, 8];
+        // A response already held by the FIFO cannot complete a new request.
+        ready_rx(0, 3, 0, 127_900, &response);
+        radio.connection_ended(127_900)?;
+        assert!(matches!(radio.poll(), Ok(Some(LinkEvent::Connected(..)))));
+        assert_eq!(radio.data_length_response_clock(), None);
+        let transmit = |radio: &mut Radio, token| {
+            radio.transmit_payload(token, FrameKind::Control, false, &request)
+        };
+        assert_eq!(transmit(&mut radio, 1), Ok(TxAdmission::Busy));
+        assert!(matches!(radio.poll(), Ok(Some(LinkEvent::Received(_)))));
+        assert_eq!(transmit(&mut radio, 1), Ok(TxAdmission::Committed));
+        radio.initialized = true;
+        let start = radio.link.as_ref().ok_or(21_u32)?.event.start.coarse;
+        EVENT_CLOCK.set(Some(start - 3));
+        radio.service_backpressure()?;
+        assert!(radio.pending.is_some());
+        ready_rx(1, 3, RX_REPEATED, 127_989, &response);
+        ready_rx(2, 2, 0, 127_990, &response);
+        ready_rx(3, 3, 0, 127_991, &[0x11, 0x16, 0x1a]);
+        assert_eq!(radio.data_length_response_clock(), None);
+        ready_rx(4, 3, 0, 127_999, &[0x07, 0x14]);
+        ready_rx(5, 3, 0, 128_001, &response);
+        // Poll the deadline before EVENT_END while RX_READY gives the CPU ownership.
+        EVENT_CLOCK.set(Some(128_002));
+        radio.service_backpressure()?;
+        assert!(radio.pending.is_some());
+        assert_eq!(radio.data_length_clock(), Some(128_002));
+        assert_eq!(radio.data_length_response_clock(), Some(127_999));
+        COMPLETED_SLOT.set(Some(radio.slot));
+        radio.service_backpressure()?;
+        assert!(radio.pending.is_none());
+        assert_eq!(transmit(&mut radio, 2), Ok(TxAdmission::Busy));
+        assert_eq!(radio.data_length_response_clock(), Some(127_999));
+        while !radio.events.is_empty() {
+            assert!(radio.poll()?.is_some());
+        }
+        assert_eq!(radio.data_length_response_clock(), Some(127_999));
+
+        let tx = PACKET_RAM + usize::from(TX_OFFSET);
+        set_halfword(tx, halfword(tx) | TX_DONE);
+        radio.connection_ended(128_005)?;
+        assert_eq!(transmit(&mut radio, 2), Ok(TxAdmission::Committed));
+        assert_eq!(radio.data_length_response_clock(), None);
+        ready_rx(0, 3, 0, 128_010, &[0x0d, 0x1a]);
+        radio.connection_ended(128_012)?;
+        assert_eq!(radio.data_length_response_clock(), Some(128_010));
+        radio.stop()?;
+        assert_eq!(radio.data_length_response_clock(), None);
+        EVENT_CLOCK.set(None);
+        Ok(())
     }
 
     #[test]
@@ -411,6 +504,14 @@ struct PendingTx {
     len: u8,
 }
 
+#[cfg(feature = "ble-gatt-dle")]
+#[derive(Debug)]
+enum LengthResponse {
+    Idle,
+    Waiting,
+    Received(u32),
+}
+
 #[derive(Debug)]
 struct Link {
     request: ConnectionRequest,
@@ -424,6 +525,10 @@ struct Link {
     echo_remaining: u8,
     #[cfg(feature = "ble-gatt-dle")]
     limits: DataLength,
+    #[cfg(feature = "ble-gatt-dle")]
+    length_response: LengthResponse,
+    #[cfg(feature = "ble-gatt-dle")]
+    queued_length_responses: u8,
     #[cfg(feature = "ble-gatt-dle")]
     tx_two_m: bool,
     phy: LinkPhy,
@@ -462,6 +567,10 @@ impl Link {
             echo_remaining: 0,
             #[cfg(feature = "ble-gatt-dle")]
             limits: DataLength::LEGACY,
+            #[cfg(feature = "ble-gatt-dle")]
+            length_response: LengthResponse::Idle,
+            #[cfg(feature = "ble-gatt-dle")]
+            queued_length_responses: 0,
             #[cfg(feature = "ble-gatt-dle")]
             tx_two_m: false,
             phy: LinkPhy::default(),
@@ -723,14 +832,24 @@ impl Radio {
                     BoardEvent::Received(frame)
                 };
                 #[cfg(feature = "ble-gatt-dle")]
+                let length_response = is_length_response(&packet);
+                #[cfg(feature = "ble-gatt-dle")]
                 let observation = BoardEvent::Received {
                     kind,
                     len: length,
                     buffer: packet.payload,
                     session: self.session,
                     rx_two_m: link.phy.rx_two_m(),
+                    length_response,
                 };
                 self.events.push(observation).map_err(|_| 22_u32)?;
+                #[cfg(feature = "ble-gatt-dle")]
+                if length_response {
+                    link.queued_length_responses += 1;
+                    if matches!(link.length_response, LengthResponse::Waiting) {
+                        link.length_response = LengthResponse::Received(packet.time.coarse);
+                    }
+                }
             } else {
                 #[cfg(feature = "ble-gatt-dle")]
                 packet.payload.release(receiver);
@@ -761,6 +880,14 @@ impl Radio {
             return Ok(TxAdmission::Busy);
         }
         #[cfg(feature = "ble-gatt-dle")]
+        let length_request =
+            kind == FrameKind::Control && matches!(payload, [0x14, ..]) && header[1] == 9;
+        // Deliver all older responses before starting another local procedure.
+        #[cfg(feature = "ble-gatt-dle")]
+        if length_request && link.queued_length_responses != 0 {
+            return Ok(TxAdmission::Busy);
+        }
+        #[cfg(feature = "ble-gatt-dle")]
         if payload.len() > usize::from(link.tx_airtime().octets()) {
             return Err(20);
         }
@@ -780,6 +907,10 @@ impl Radio {
         set_halfword(descriptor + 4, TX_PAYLOAD_OFFSET);
         fence(Ordering::Release);
         set_halfword(descriptor, next & !TX_DONE);
+        #[cfg(feature = "ble-gatt-dle")]
+        if length_request {
+            link.length_response = LengthResponse::Waiting;
+        }
         #[cfg(feature = "ble-gatt-dle")]
         FR29_DLE_OBSERVATIONS[3].fetch_max(u32::from(header[1]), Ordering::Relaxed);
         link.tx = Some(PendingTx {
@@ -840,18 +971,16 @@ impl Radio {
                 buffer,
                 session,
                 rx_two_m,
+                length_response,
             } => {
                 if session != self.session {
                     return Err(21);
                 }
                 // Length updates are consumed in FIFO order. PHY instants run
                 // independently, so use the rate of the completed RX slot.
-                let limit = self
-                    .link
-                    .as_ref()
-                    .ok_or(21_u32)?
-                    .rx_airtime(rx_two_m)
-                    .octets();
+                let link = self.link.as_mut().ok_or(21_u32)?;
+                link.queued_length_responses -= u8::from(length_response);
+                let limit = link.rx_airtime(rx_two_m).octets();
                 let receiver = self.receiver.as_mut().ok_or(21_u32)?;
                 if len > limit {
                     buffer.release(receiver);
@@ -1055,6 +1184,20 @@ impl LinkBackend for Radio {
     #[cfg(feature = "ble-gatt-dle")]
     fn data_length_clock(&self) -> Option<u32> {
         Some(self.last_clock)
+    }
+
+    #[cfg(feature = "ble-gatt-dle")]
+    fn data_length_response_clock(&self) -> Option<u32> {
+        match self.link.as_ref()?.length_response {
+            LengthResponse::Received(time) => Some(time),
+            LengthResponse::Waiting if self.pending.is_some() => Some(
+                self.receiver
+                    .as_ref()?
+                    .ready_time(is_length_response)?
+                    .coarse,
+            ),
+            _ => None,
+        }
     }
 
     #[cfg(feature = "ble-gatt-dle")]

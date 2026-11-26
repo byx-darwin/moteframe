@@ -11,6 +11,9 @@ struct Backend {
     maintenance: usize,
     #[cfg(feature = "data-length")]
     clock: u32,
+    #[cfg(feature = "data-length")]
+    receipt: Option<u32>,
+    stops: usize,
     busy: bool,
     fail: bool,
     short_fragments: bool,
@@ -30,6 +33,10 @@ impl LinkBackend for Backend {
     #[cfg(feature = "data-length")]
     fn data_length_clock(&self) -> Option<u32> {
         Some(self.clock)
+    }
+    #[cfg(feature = "data-length")]
+    fn data_length_response_clock(&self) -> Option<u32> {
+        self.receipt
     }
     fn data_length_updated(&mut self, limits: DataLength) {
         self.lengths = Some(limits);
@@ -62,6 +69,7 @@ impl LinkBackend for Backend {
         Ok(())
     }
     fn stop(&mut self) -> Result<(), Self::Error> {
+        self.stops += 1;
         Ok(())
     }
     fn poll(&mut self) -> Result<Option<LinkEvent>, Self::Error> {
@@ -619,4 +627,154 @@ fn length_response_in_the_receive_queue_cancels_timeout() {
     core.service().unwrap();
     assert_eq!(core.connection(), Some(id));
     assert_eq!(core.backend_mut().lengths, Some(DataLength::MAX));
+}
+
+#[cfg(feature = "data-length")]
+#[test]
+fn length_deadline_disconnects_with_full_host_queues_in_fifo_order() {
+    for acl in [true, false] {
+        let mut core = connected();
+        let id = core.connection().unwrap();
+        core.backend_mut().lengths = Some(DataLength::LEGACY);
+        core.service().unwrap();
+        let count = if acl { 2 } else { 16 };
+        for n in 0..count {
+            let event = if acl {
+                LinkEvent::Received(frame(n))
+            } else {
+                LinkEvent::PhyUpdated(1, 1)
+            };
+            core.backend_mut().events.push_back(event);
+        }
+        core.service().unwrap();
+        core.service().unwrap();
+        core.backend_mut().clock = 128_000;
+        core.service().unwrap();
+        assert_eq!(core.connection(), None);
+        assert_eq!(core.backend_mut().stops, 1);
+        for n in 0..count {
+            let expected = if acl {
+                ControllerEvent::Acl {
+                    id,
+                    frame: frame(n),
+                }
+            } else {
+                ControllerEvent::PhyUpdated { id, tx: 1, rx: 1 }
+            };
+            assert_eq!(core.next_event(), Some(expected));
+        }
+        assert_eq!(
+            core.next_event(),
+            Some(ControllerEvent::Disconnected { id, reason: 0x22 })
+        );
+        assert!(core.next_event().is_none());
+        core.advertise(advertisement()).unwrap();
+    }
+}
+
+#[cfg(feature = "data-length")]
+#[test]
+fn length_deadline_keeps_timely_ninth_response_even_after_clock_wrap() {
+    let mut core = connected();
+    let id = core.connection().unwrap();
+    let start = 0x0fff_fe00;
+    core.backend_mut().clock = start;
+    core.backend_mut().lengths = Some(DataLength::LEGACY);
+    core.service().unwrap();
+    let ignored = LinkEvent::Received(LinkFrame::new(FrameKind::Control, &[0x07, 0x70]).unwrap());
+    core.backend_mut().events.extend([ignored; 8]);
+    let response =
+        LinkFrame::new(FrameKind::Control, &[0x15, 251, 0, 72, 8, 251, 0, 72, 8]).unwrap();
+    core.backend_mut()
+        .events
+        .push_back(LinkEvent::Received(response));
+    core.backend_mut().receipt = Some((start + 127_999) & 0x0fff_ffff);
+    core.backend_mut().clock = (start + 128_010) & 0x0fff_ffff;
+    core.service().unwrap();
+    assert_eq!(core.connection(), Some(id));
+    assert_eq!(core.backend_mut().events.len(), 1);
+    core.service().unwrap();
+    assert_eq!(
+        core.next_event(),
+        Some(ControllerEvent::DataLengthChanged {
+            id,
+            limits: DataLength::MAX
+        })
+    );
+}
+
+#[cfg(feature = "data-length")]
+#[test]
+fn length_deadline_does_not_accept_a_late_response_at_the_front() {
+    let mut core = connected();
+    let id = core.connection().unwrap();
+    core.backend_mut().lengths = Some(DataLength::LEGACY);
+    core.service().unwrap();
+    let response =
+        LinkFrame::new(FrameKind::Control, &[0x15, 251, 0, 72, 8, 251, 0, 72, 8]).unwrap();
+    core.backend_mut()
+        .events
+        .push_back(LinkEvent::Received(response));
+    core.backend_mut().receipt = Some(128_001);
+    core.backend_mut().clock = 128_001;
+    core.service().unwrap();
+    assert_eq!(
+        core.next_event(),
+        Some(ControllerEvent::Disconnected { id, reason: 0x22 })
+    );
+}
+
+#[cfg(feature = "data-length")]
+#[test]
+fn length_deadline_preserves_timely_reply_behind_full_acl_pool() {
+    let mut core = connected();
+    let id = core.connection().unwrap();
+    core.backend_mut().lengths = Some(DataLength::LEGACY);
+    core.service().unwrap();
+    let reject = LinkFrame::new(FrameKind::Control, &[0x11, 0x14, 0x1a]).unwrap();
+    core.backend_mut().events.extend([
+        LinkEvent::Received(frame(1)),
+        LinkEvent::Received(frame(2)),
+        LinkEvent::Received(reject),
+    ]);
+    core.backend_mut().receipt = Some(128_000);
+    core.backend_mut().clock = 128_001;
+    core.service().unwrap();
+    core.service().unwrap();
+    assert_eq!(core.connection(), Some(id));
+    assert_eq!(core.backend_mut().events.len(), 1);
+    for n in [1, 2] {
+        assert_eq!(
+            core.next_event(),
+            Some(ControllerEvent::Acl {
+                id,
+                frame: frame(n)
+            })
+        );
+    }
+    core.service().unwrap();
+    assert!(core.backend_mut().events.is_empty());
+    core.backend_mut().receipt = None;
+    core.backend_mut().clock += 128_000;
+    core.service().unwrap();
+    assert_eq!(core.connection(), Some(id));
+}
+
+#[cfg(feature = "data-length")]
+#[test]
+fn length_deadline_ignores_truncated_response() {
+    let mut core = connected();
+    let id = core.connection().unwrap();
+    core.backend_mut().lengths = Some(DataLength::LEGACY);
+    core.service().unwrap();
+    let truncated = LinkFrame::new(FrameKind::Control, &[0x15, 0]).unwrap();
+    core.backend_mut()
+        .events
+        .push_back(LinkEvent::Received(truncated));
+    core.backend_mut().clock = 128_000;
+    core.service().unwrap();
+    assert_eq!(
+        core.next_event(),
+        Some(ControllerEvent::Disconnected { id, reason: 0x22 })
+    );
 }

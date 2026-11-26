@@ -81,21 +81,20 @@ impl RxBuffer {
 }
 
 impl Receiver {
-    /// Takes ownership of a data buffer without copying it into the event queue.
     #[cfg(feature = "ble-gatt-dle")]
     #[inline(never)]
-    pub(super) fn take_link(&mut self) -> Result<Option<HeldRx>, u32> {
-        let address = descriptor(self.next);
-        if self.held & (1 << self.next) != 0 || halfword(address) & RX_READY == 0 {
+    fn ready_link(&self, index: usize) -> Result<Option<HeldRx>, u32> {
+        let address = descriptor(index);
+        if self.held & (1 << index) != 0 || halfword(address) & RX_READY == 0 {
             return Ok(None);
         }
         fence(Ordering::Acquire);
         let offset = halfword(address + 0x14);
-        if offset != receive_descriptor(u16::from(self.next.to_le_bytes()[0]))[10] {
+        if offset != receive_descriptor(u16::from(index.to_le_bytes()[0]))[10] {
             return Err(17);
         }
         let fine = halfword(address + 0x0c);
-        let packet = HeldRx {
+        Ok(Some(HeldRx {
             header: halfword(address + 4),
             status: halfword(address + 2),
             time: PacketTime {
@@ -104,9 +103,31 @@ impl Receiver {
             },
             link_id: fine >> 11,
             payload: RxBuffer {
-                index: self.next.to_le_bytes()[0],
+                index: index.to_le_bytes()[0],
                 offset,
             },
+        }))
+    }
+
+    /// Observe CPU-owned descriptors before `EVENT_END` without consuming them.
+    #[cfg(feature = "ble-gatt-dle")]
+    pub(super) fn ready_time(&self, matches: impl Fn(&HeldRx) -> bool) -> Option<PacketTime> {
+        let mut index = self.next;
+        for _ in 0..RX_COUNT {
+            let packet = self.ready_link(index).ok()??;
+            if matches(&packet) {
+                return Some(packet.time);
+            }
+            index = (index + 1) % RX_COUNT;
+        }
+        None
+    }
+
+    /// Takes ownership of a data buffer without copying it into the event queue.
+    #[cfg(feature = "ble-gatt-dle")]
+    pub(super) fn take_link(&mut self) -> Result<Option<HeldRx>, u32> {
+        let Some(packet) = self.ready_link(self.next)? else {
+            return Ok(None);
         };
         self.held |= 1 << self.next;
         self.next = (self.next + 1) % RX_COUNT;

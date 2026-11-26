@@ -148,11 +148,15 @@ impl<F> ControllerEvent<F> {
 
 #[derive(Debug)]
 pub(super) struct EventQueue {
-    order: OwnedQueue<ControllerEvent<()>, 16>,
+    // Normal observations retain 16 slots. A timed-out link can append its
+    // disconnect even while all 16 are occupied, preserving FIFO delivery.
+    order: OwnedQueue<ControllerEvent<()>, { Self::NORMAL_CAPACITY + 1 }>,
     received: OwnedQueue<LinkFrame, 2>,
 }
 
 impl EventQueue {
+    const NORMAL_CAPACITY: usize = 16;
+
     pub const fn new() -> Self {
         Self {
             order: OwnedQueue::new(),
@@ -168,7 +172,7 @@ impl EventQueue {
         self.order.is_empty()
     }
     pub const fn is_full(&self) -> bool {
-        self.order.is_full() || self.received.is_full()
+        self.order.len() >= Self::NORMAL_CAPACITY || self.received.is_full()
     }
     pub fn push_acl(&mut self, id: crate::ConnectionId, frame: LinkFrame) -> Result<(), QueueFull> {
         if self.order.is_full() {

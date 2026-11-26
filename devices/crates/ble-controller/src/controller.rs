@@ -456,7 +456,9 @@ impl<B: LinkBackend> Controller<B> {
         opcode: u8,
         bytes: &[u8],
     ) -> Result<(), ControllerError<B::Error>> {
-        if opcode == 0x15 && !matches!(self.lengths.procedure, Procedure::Waiting(_)) {
+        if opcode == 0x15
+            && (bytes.len() != 8 || !matches!(self.lengths.procedure, Procedure::Waiting(_)))
+        {
             return Ok(());
         }
         let Some(peer) = DataLength::from_peer(bytes) else {
@@ -477,7 +479,27 @@ impl<B: LinkBackend> Controller<B> {
         self.apply_length()
     }
 
+    #[cfg(feature = "data-length")]
+    fn late_length_response(&self, payload: &[u8]) -> bool {
+        let Procedure::Waiting(start) = self.lengths.procedure else {
+            return false;
+        };
+        let [opcode, parameter, ..] = payload else {
+            return false;
+        };
+        DataLength::is_response_header(*opcode, *parameter, payload.len())
+            && self
+                .backend
+                .data_length_response_clock()
+                .or_else(|| self.backend.data_length_clock())
+                .is_some_and(|arrival| Self::length_elapsed(start, arrival) > Self::LENGTH_TIMEOUT)
+    }
+
     fn receive_control(&mut self, payload: &[u8]) -> Result<(), ControllerError<B::Error>> {
+        #[cfg(feature = "data-length")]
+        if self.late_length_response(payload) {
+            return self.end(0x22);
+        }
         match payload {
             [0x00, ..] if payload.len() == 12 => self
                 .backend
@@ -728,6 +750,15 @@ impl<B: LinkBackend> Controller<B> {
         }
         Ok(())
     }
+    // The native clock wraps at 28 bits and ticks once per 312.5 µs.
+    #[cfg(feature = "data-length")]
+    const LENGTH_TIMEOUT: u32 = 128_000;
+
+    #[cfg(feature = "data-length")]
+    const fn length_elapsed(start: u32, sample: u32) -> u32 {
+        sample.wrapping_sub(start) & 0x0fff_ffff
+    }
+
     fn advance(&mut self) -> Result<(), ControllerError<B::Error>> {
         // Leave room for the Host observation, including a local disconnect.
         #[cfg(feature = "data-length")]
@@ -755,10 +786,13 @@ impl<B: LinkBackend> Controller<B> {
             self.observe(&event)?;
         }
         #[cfg(feature = "data-length")]
-        if !self.events.is_full()
-            && let Procedure::Waiting(start) = self.lengths.procedure
+        if let Procedure::Waiting(start) = self.lengths.procedure
             && let Some(now) = self.backend.data_length_clock()
-            && (now.wrapping_sub(start) & 0x0fff_ffff) >= 128_000
+            && Self::length_elapsed(start, now) >= Self::LENGTH_TIMEOUT
+            && self
+                .backend
+                .data_length_response_clock()
+                .is_none_or(|arrival| Self::length_elapsed(start, arrival) > Self::LENGTH_TIMEOUT)
         {
             // LL response timeout is 40 s, independent of supervision traffic.
             return self.end(0x22);

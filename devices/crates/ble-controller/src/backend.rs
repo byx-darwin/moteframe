@@ -113,6 +113,15 @@ pub trait LinkBackend: core::fmt::Debug {
     fn data_length_clock(&self) -> Option<u32> {
         None
     }
+    /// Native RX timestamp of the first length response or matching rejection for
+    /// the last committed local length request. Buffered DLE backends must expose
+    /// it before Host delivery, including under RX backpressure, and retain it
+    /// through dequeue. Reset it on the next request and on link teardown.
+    /// Synchronous backends without an RX backlog can use the delivery clock.
+    #[cfg(feature = "data-length")]
+    fn data_length_response_clock(&self) -> Option<u32> {
+        None
+    }
     /// Apply the effective limits in peripheral order to future radio PDUs.
     fn data_length_updated(&mut self, _limits: crate::DataLength) {}
     /// Optional peripheral PHY procedure support; legacy backends remain 1M-only.

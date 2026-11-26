@@ -30,6 +30,17 @@ impl DataLength {
 
 #[cfg(feature = "data-length")]
 impl DataLength {
+    /// Whether this control PDU answers a local `LL_LENGTH_REQ`. The parameter
+    /// is the first byte after the opcode (the rejected opcode for extended
+    /// rejection / unknown response). A legacy rejection has no opcode field.
+    #[must_use]
+    pub const fn is_response_header(opcode: u8, parameter: u8, len: usize) -> bool {
+        matches!(
+            (opcode, parameter, len),
+            (0x15, _, 9) | (0x07, 0x14, 2) | (0x11, 0x14, 3) | (0x0d, _, 2)
+        )
+    }
+
     pub(crate) fn from_peer(p: &[u8]) -> Option<Self> {
         let fields: &[u8; 8] = p.try_into().ok()?;
         let word = |i: usize| u16::from_le_bytes([fields[i], fields[i + 1]]);
