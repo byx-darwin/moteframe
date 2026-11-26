@@ -165,6 +165,11 @@ proc restore_needed {app header original candidate} {
     if {$header_original || $header_candidate} {
         if {$app_original || $app_candidate || [matches_restore_prefix $app $stock_app]} { return 1 }
     }
+    # Install writes the application first and erases the header second.
+    # Neither state carries the Flash marker; the caller verifies the SRAM witness.
+    if {$header_original && [matches_restore_prefix $app [dict get $candidate 0x2000]]} { return 1 }
+    if {[same_words $header [lrepeat 1024 0xffffffff]] &&
+        ($app_candidate || [matches_restore_prefix $app $stock_app])} { return 1 }
     # Header restore starts only after the original app has been verified.
     if {$app_original && [matches_restore_prefix $header $stock_header]} { return 1 }
     error "Starting sectors do not match the package or an interrupted restore"
@@ -178,6 +183,26 @@ proc install_pair {original candidate} {
         set ::rollback_needed 0
         error "Install failed and original sectors were restored: $failure"
     }
+}
+
+# Hash and decode one immutable byte snapshot for both restore and install rollback.
+proc verified_original {original} {
+    set words [exec python3 -c {
+import hashlib, pathlib, struct, sys
+data = pathlib.Path(sys.argv[1]).read_bytes()
+if len(data) != 1048576:
+    sys.exit("Expected a 1 MiB backup")
+print(*struct.unpack("<8I", hashlib.sha256(data).digest()),
+      *struct.unpack_from("<1024I", data, 0),
+      *struct.unpack_from("<1024I", data, 8192))
+} [dict get $original backup_file]]
+    verify_words "Full backup SHA-256" [lrange $words 0 7] [dict get $original backup_digest]
+    foreach {offset begin end} {0x0 8 1031 0x2000 1032 2055} {
+        set sector [lrange $words $begin $end]
+        verify_words "Backup sector $offset" $sector [dict get $original $offset]
+        dict set original $offset $sector
+    }
+    return $original
 }
 
 proc flash_trial {action original candidate ota helper} {
@@ -194,6 +219,7 @@ proc flash_trial {action original candidate ota helper} {
     set marker [linsert $digest 0 0x3130464d]
     if {[llength $digest] != 8} { error "Invalid backup digest" }
     verify_words "Package backup marker" [lrange [dict get $candidate 0x0] 55 63] $marker
+    set original [verified_original $original]
     if {[word 0xe000ed00] != 0x410fd210} { error "CPU doesn't match the FR8029D board" }
     # Only a completed install rollback may reset on an error.
     set ::rollback_needed 1
@@ -238,13 +264,7 @@ proc flash_trial {action original candidate ota helper} {
         set header [read_sector 0]
         set app [read_sector 0x2000]
         if {$action eq "install"} {
-            set backup [dict get $original backup_file]
-            set file_digest [exec python3 -c {
-import hashlib, pathlib, struct, sys
-print(*struct.unpack("<8I", hashlib.sha256(pathlib.Path(sys.argv[1]).read_bytes()).digest()))
-} $backup]
-            verify_words "Installation backup SHA-256" $file_digest $digest
-            verify_image $backup 0x10000000 bin
+            verify_image [dict get $original backup_file] 0x10000000 bin
             verify_words "Starting header" $header [dict get $original 0x0]
             verify_words "Starting application" $app [dict get $original 0x2000]
             set needs_write 1

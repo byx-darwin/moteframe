@@ -31,11 +31,27 @@ proc burn_sector {offset words} {
 }
 set stock [dict create 0x2000 [lrepeat 1024 0x1234] 0x0 [lrepeat 1024 0x1234]]
 set candidate [dict create 0x2000 [lrepeat 1024 0xcafe] 0x0 [lrepeat 1024 0xcafe]]
-dict set stock backup_digest [lrepeat 8 0x1234]
-dict set stock backup_file mock.bin
+# Real full-size files exercise the production digest and sector decoder.
+proc model_backup {variant} {
+    return [exec python3 -c {
+import hashlib, os, struct, sys, tempfile
+data = bytearray(1048576)
+for offset in (0, 8192):
+    struct.pack_into("<1024I", data, offset, *([0x1234] * 1024))
+if sys.argv[1] == "other":
+    struct.pack_into("<I", data, 8192 + 40, 0x0123)
+fd, path = tempfile.mkstemp()
+with os.fdopen(fd, "wb") as f:
+    f.write(data)
+print("{" + path + "}", *struct.unpack("<8I", hashlib.sha256(data).digest()))
+} $variant]
+}
+set fixture [model_backup stock]
+dict set stock backup_file [lindex $fixture 0]
+dict set stock backup_digest [lrange $fixture 1 end]
 dict set candidate 0x0 [lreplace [dict get $candidate 0x0] 55 63 0x3130464d {*}[dict get $stock backup_digest]]
 proc verify_image {file address format} {
-    check {$file eq "mock.bin" && $address == 0x10000000 && $format eq "bin"}
+    check {$file eq [dict get $::stock backup_file] && $address == 0x10000000 && $format eq "bin"}
 }
 set attempts {}
 set inject_error 0
@@ -221,13 +237,13 @@ foreach {xpsr_value pmu message_pattern} {
 start_trial $probe_app $probe_header
 set fail_page 0x200
 check {[catch {trial restore} message] && [string match {*page writer interrupted*} $message]}
-check {$sectors(8192) eq $stock_app}
+check {[same_words $sectors(8192) $stock_app]}
 check {[lindex $sectors(0) 127] == 0x1234 && [lindex $sectors(0) 128] == 0xffffffff}
 check {$sr1 == 0x7c && $resets == 0}
 set erases {}
 set fail_page -1
 trial restore
-check {$erases eq {0} && $sectors(0) eq $stock_header && $sectors(4096) eq $ota}
+check {$erases eq {0} && [same_words $sectors(0) $stock_header] && [same_words $sectors(4096) $ota]}
 check {$resets == 1 && $sr1 == 0x7c}
 
 # Retry an app write after erase or after one page. A previous install may
@@ -241,7 +257,7 @@ foreach {failure header expected_erases} [list 0x2000 $probe_header {8192 0} \
     set fail_page -1
     set erases {}
     trial restore
-    check {$erases eq $expected_erases && $sectors(8192) eq $stock_app && $sectors(0) eq $stock_header}
+    check {$erases eq $expected_erases && [same_words $sectors(8192) $stock_app] && [same_words $sectors(0) $stock_header]}
 }
 foreach {app header expected_erases} [list $stock_app $probe_header {0} \
         $probe_app $stock_header {8192} $stock_app $stock_header {}] {
@@ -302,11 +318,11 @@ foreach {app matches} [list $unknown 0 $probe_app 1] {
     if {$matches} {
         trial restore
         check {$erases eq {8192 0} && $resets == 1 && $sr1 == 0x7c && !$wel}
-        check {$sectors(8192) eq $stock_app && $sectors(0) eq $stock_header}
+        check {[same_words $sectors(8192) $stock_app] && [same_words $sectors(0) $stock_header]}
     } else {
         check {[catch {trial restore}]}
         check {$wel == 2 && $protections eq {} && $erases eq {} && $resets == 0}
-        check {$sectors(8192) eq $app && $sectors(0) eq $probe_header}
+        check {[same_words $sectors(8192) $app] && [same_words $sectors(0) $probe_header]}
     }
 }
 # First WREN, both installed sectors still contain the probe. Two internally
@@ -315,16 +331,18 @@ start_trial $probe_app $probe_header
 set sr1 0
 stig 0x06000000
 set other_stock $stock
-dict set other_stock backup_digest [lrepeat 8 0xabcd]
+set other_fixture [model_backup other]
+dict set other_stock backup_digest [lrange $other_fixture 1 end]
+dict set other_stock backup_file [lindex $other_fixture 0]
 dict set other_stock 0x2000 [lreplace $stock_app 10 10 0x0123]
 set other_candidate $candidate
 dict set other_candidate 0x0 [lreplace $probe_header 56 63 {*}[dict get $other_stock backup_digest]]
 check {[catch {flash_trial restore $other_stock $other_candidate $ota $helper} msg]}
 check {[string match {*Installed backup marker*} $msg]}
 check {$erases eq {} && $protections eq {} && $wel == 2 && $resets == 0}
-check {$sectors(8192) eq $probe_app && $sectors(0) eq $probe_header}
+check {[same_words $sectors(8192) $probe_app] && [same_words $sectors(0) $probe_header]}
 trial restore
-check {$sectors(8192) eq $stock_app && $sectors(0) eq $stock_header}
+check {[same_words $sectors(8192) $stock_app] && [same_words $sectors(0) $stock_header]}
 check {$erases eq {8192 0} && $sr1 == 0x7c && !$wel && $resets == 1}
 puts "Interrupted restore, idempotence and preflight guards passed."
 
@@ -335,7 +353,7 @@ stig 0x06000000
 check {[catch {flash_trial restore $other_stock $other_candidate $ota $helper}]}
 check {$erases eq {} && $wel == 2 && $protections eq {}}
 trial restore
-check {$erases eq {0} && $sectors(0) eq $stock_header && $sr1 == 0x7c}
+check {$erases eq {0} && [same_words $sectors(0) $stock_header] && $sr1 == 0x7c}
 
 # A header erase also removes the Flash marker; refuse ambiguous writes if
 # power loss has removed the transaction's SRAM witness.
@@ -343,3 +361,39 @@ start_trial $stock_app $partial
 set witness [lrepeat 9 0]
 check {[catch {trial restore} msg] && [string match {*Retained backup marker*} $msg]}
 check {$erases eq {} && $protections eq {} && $resets == 0}
+
+# Both outgoing sectors must match the hashed file before clearing WEL.
+foreach offset {0x0 0x2000} {
+    start_trial $probe_app $probe_header
+    set sr1 0
+    stig 0x06000000
+    set damaged $stock
+    set words [dict get $stock $offset]
+    dict set damaged $offset [lreplace $words 32 32 [expr {[lindex $words 32] ^ 1}]]
+    check {[catch {flash_trial restore $damaged $candidate $ota $helper}]}
+    check {$wel == 2 && $erases eq {} && $protections eq {} && $resets == 0}
+    check {[same_words $sectors(8192) $probe_app] && [same_words $sectors(0) $probe_header]}
+}
+# Interrupted install, before a Flash marker exists. Only the powered
+# transaction's matching SRAM marker authorizes recovery.
+set blank [lrepeat 1024 0xffffffff]
+set probe_prefix [concat [lrange $probe_app 0 63] [lrepeat 960 0xffffffff]]
+foreach {app header} [list $probe_prefix $stock_header $probe_app $blank] {
+    foreach identity {wrong missing correct} {
+        start_trial $app $header
+        set sr1 0
+        stig 0x06000000
+        if {$identity eq "correct"} {
+            trial restore
+            check {[same_words $sectors(8192) $stock_app] && [same_words $sectors(0) $stock_header]}
+            check {$sr1 == 0x7c && !$wel && $resets == 1}
+        } else {
+            if {$identity eq "missing"} { set witness [lrepeat 9 0] }
+            if {$identity eq "wrong"} { set witness [linsert [dict get $other_stock backup_digest] 0 0x3130464d] }
+            check {[catch {trial restore} msg] && [string match {*Retained backup marker*} $msg]}
+            check {$wel == 2 && $erases eq {} && $protections eq {} && $resets == 0}
+            check {[same_words $sectors(8192) $app] && [same_words $sectors(0) $header]}
+        }
+    }
+}
+file delete [dict get $stock backup_file] [dict get $other_stock backup_file]
