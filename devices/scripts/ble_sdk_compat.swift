@@ -1,10 +1,33 @@
 // Verify the SDK v0.3.6 FFF0 peripheral profile from a Mac.
-// swift ble_sdk_compat.swift 802x_Ble_Periphreal | FR29-GAT2 | FR29-RTOS
+// swift ble_sdk_compat.swift 802x_Ble_Periphreal | FR29-GAT2 | FR29-XN01 | FR29-RTOS
 import CoreBluetooth
 import Foundation
 
+enum SDKTarget: String, CaseIterable {
+    case stock = "802x_Ble_Periphreal"
+    case bare = "FR29-GAT2"
+    case bareFlash = "FR29-XN01"
+    case freeRTOS = "FR29-RTOS"
+
+    static func parse(_ arguments: [String]) -> Self? {
+        guard arguments.count == 1 else { return nil }
+        return Self(rawValue: arguments[0])
+    }
+
+    private static let bareMarker = Data([0xff, 0xff] + "MFR29A1".utf8)
+    private static let rtosMarker = Data([0xff, 0xff] + "MFR29R1".utf8)
+
+    func matches(localName: String?, manufacturerData: Data?) -> Bool {
+        if self != .stock {
+            if manufacturerData == Self.bareMarker { return self == .bare }
+            if manufacturerData == Self.rtosMarker { return self == .freeRTOS }
+        }
+        return localName == rawValue
+    }
+}
+
 final class SDKCheck: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
-    let name: String
+    let target: SDKTarget
     let serviceID = CBUUID(string: "FFF0")
     let valueID = CBUUID(string: "FFF3")
     let otherID = CBUUID(string: "0783B03E-8535-B5A0-7140-A304F4FF5CBA")
@@ -18,8 +41,8 @@ final class SDKCheck: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     var subscriptionReady = false
     var receivedNotice = false
 
-    init(name: String) {
-        self.name = name
+    init(target: SDKTarget) {
+        self.target = target
         super.init()
         manager = CBCentralManager(delegate: self, queue: .main)
     }
@@ -38,10 +61,9 @@ final class SDKCheck: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     }
     func centralManager(_ central: CBCentralManager, didDiscover p: CBPeripheral,
                         advertisementData a: [String: Any], rssi: NSNumber) {
-        let marker = name == "FR29-GAT2" ? "MFR29A1" : "MFR29R1"
-        let marked = name != "802x_Ble_Periphreal" &&
-            a[CBAdvertisementDataManufacturerDataKey] as? Data == Data([255, 255] + marker.utf8)
-        guard stage == .scan, a[CBAdvertisementDataLocalNameKey] as? String == name || marked else { return }
+        guard stage == .scan, target.matches(localName: a[CBAdvertisementDataLocalNameKey] as? String,
+                                             manufacturerData: a[CBAdvertisementDataManufacturerDataKey] as? Data)
+        else { return }
         peer = p
         p.delegate = self
         stage = .discover
@@ -111,16 +133,35 @@ final class SDKCheck: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     }
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral p: CBPeripheral, error: Error?) {
         guard stage == .done && error == nil else { fail("Disconnected during test") }
-        print("PASS \(name) SDK read-only value, FFF3 read, subscription notification, 20-byte write, fixed readback")
+        print("PASS \(target.rawValue) SDK read-only value, FFF3 read, subscription notification, 20-byte write, fixed readback")
         exit(0)
     }
 }
 
-guard CommandLine.arguments.count == 2,
-      ["802x_Ble_Periphreal", "FR29-GAT2", "FR29-RTOS"].contains(CommandLine.arguments[1]) else {
-    print("Usage: ble_sdk_compat.swift 802x_Ble_Periphreal|FR29-GAT2|FR29-RTOS")
+#if BLE_SDK_COMPAT_TESTS
+let flash = SDKTarget.bareFlash
+precondition(SDKTarget.parse(["FR29-XN01"]) == flash)
+precondition(SDKTarget.parse([]) == nil && SDKTarget.parse(["FR29-XN01", "extra"]) == nil)
+precondition(SDKTarget.parse(["unknown"]) == nil)
+precondition(flash.matches(localName: "FR29-XN01", manufacturerData: nil))
+precondition(!flash.matches(localName: "FR29-GAT2", manufacturerData: nil))
+for (target, marker) in [(SDKTarget.bare, "MFR29A1"), (.freeRTOS, "MFR29R1")] {
+    let data = Data([0xff, 0xff] + marker.utf8)
+    precondition(target.matches(localName: nil, manufacturerData: data))
+    precondition(!flash.matches(localName: nil, manufacturerData: data))
+    precondition(!flash.matches(localName: "FR29-XN01", manufacturerData: data))
+}
+for target in SDKTarget.allCases {
+    precondition(SDKTarget.parse([target.rawValue]) == target)
+    precondition(target.matches(localName: target.rawValue, manufacturerData: nil))
+}
+print("SDK probe target and advertisement checks passed")
+#else
+guard let target = SDKTarget.parse(Array(CommandLine.arguments.dropFirst())) else {
+    print("Usage: ble_sdk_compat.swift " + SDKTarget.allCases.map { $0.rawValue }.joined(separator: "|"))
     exit(2)
 }
-let check = SDKCheck(name: CommandLine.arguments[1])
+let check = SDKCheck(target: target)
 DispatchQueue.main.asyncAfter(deadline: .now() + 40) { check.fail("Timeout") }
 RunLoop.main.run()
+#endif

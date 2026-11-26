@@ -53,7 +53,13 @@ fn record_limits(limits: DataLength) {
 #[derive(Debug)]
 enum BoardEvent {
     Connected(Peer, ConnectionParameters),
-    Received(FrameKind, u8, RxBuffer, u32),
+    Received {
+        kind: FrameKind,
+        len: u8,
+        buffer: RxBuffer,
+        session: u32,
+        rx_two_m: bool,
+    },
     Acknowledged(u32),
     Disconnected(u8),
     ParametersUpdated(ConnectionParameters),
@@ -138,7 +144,6 @@ mod tests {
         Ok(())
     }
 
-    #[cfg(feature = "ble-gatt-dle")]
     fn connected_fixture() -> Result<super::Radio, u32> {
         use super::*;
         let mut radio = Radio::new();
@@ -167,6 +172,31 @@ mod tests {
         Ok(radio)
     }
 
+    #[test]
+    fn late_unsubmitted_slots_advance_csa1_across_counter_and_channel_wrap() -> Result<(), u32> {
+        use super::*;
+
+        let mut radio = connected_fixture()?;
+        let link = radio.link.as_mut().ok_or(21_u32)?;
+        link.anchor = Some(link.request_time);
+        link.counter = u16::MAX;
+        let hop_state = CONTROL + 0x18;
+        set_halfword(hop_state, 0x8800 | 32);
+        for (counter, channel) in [(0, 3), (1, 11)] {
+            let start = radio.link.as_ref().ok_or(21_u32)?.event.start.coarse;
+            radio.schedule(start)?;
+            assert!(radio.pending.is_none());
+            assert_eq!(radio.link.as_ref().ok_or(21_u32)?.counter, counter);
+            assert_eq!(halfword(hop_state), 0x8800 | channel);
+        }
+        let start = radio.link.as_ref().ok_or(21_u32)?.event.start.coarse;
+        radio.schedule(start.wrapping_sub(1) & CLOCK_MASK)?;
+        assert!(radio.pending.is_some());
+        // The baseband performs the next hop itself when this slot executes.
+        assert_eq!(halfword(hop_state), 0x880b);
+        Ok(())
+    }
+
     #[cfg(feature = "ble-gatt-dle")]
     #[test]
     fn supervision_timeout_retires_held_descriptors_before_new_session() -> Result<(), u32> {
@@ -187,6 +217,54 @@ mod tests {
         assert!(radio.events.is_empty());
         let mut receiver = Receiver::start();
         assert!(receiver.take_link()?.is_none());
+        Ok(())
+    }
+
+    #[cfg(all(feature = "ble-gatt-dle", not(feature = "ble-gatt-1m-only")))]
+    #[test]
+    fn queued_rx_uses_the_phy_of_its_receive_event() -> Result<(), u32> {
+        use super::*;
+        use fr8029d_bringup::advertising::RX_OFFSET;
+        for received_two_m in [true, false] {
+            let mut radio = connected_fixture()?;
+            let link = radio.link.as_mut().ok_or(21_u32)?;
+            if received_two_m {
+                assert!(link.phy.schedule(0, 0, 2, 0));
+                assert!(link.phy.apply(0).is_some());
+            }
+            radio.data_length_updated(DataLength {
+                rx_time: 1100,
+                ..DataLength::MAX
+            });
+            let rx = PACKET_RAM + usize::from(RX_OFFSET);
+            let payload = core::array::from_fn::<_, 251, _>(|i| i.to_le_bytes()[0]);
+            let offset = usize::from(halfword(rx + 0x14));
+            for (i, byte) in payload.iter().enumerate() {
+                write8(PACKET_RAM + offset + i, *byte);
+            }
+            set_halfword(rx + 4, u16::from_le_bytes([2, 251]));
+            set_halfword(rx + 0xc, u16::from(LINK_ID) << 11);
+            set_halfword(rx, halfword(rx) | 0x8000);
+            radio.connection_ended(0)?;
+            assert!(matches!(radio.poll(), Ok(Some(LinkEvent::Connected(..)))));
+
+            // Apply a new PHY at the next instant while the first RX is still queued.
+            let link = radio.link.as_mut().ok_or(21_u32)?;
+            let next_rx = if received_two_m { 1 } else { 2 };
+            assert!(link.phy.schedule(link.counter, link.counter, next_rx, 0));
+            let now = link.event.start.coarse.wrapping_sub(SLOT_LEAD_TICKS + 1) & CLOCK_MASK;
+            radio.schedule(now)?;
+            if received_two_m {
+                let Some(LinkEvent::Received(frame)) = radio.poll()? else {
+                    panic!("missing queued RX")
+                };
+                assert_eq!(frame.payload(), payload);
+            } else {
+                // A faster later PHY cannot make a packet fit its original RX window.
+                assert_eq!(radio.poll(), Err(20));
+            }
+            assert_eq!(halfword(rx) & 0x8000, 0);
+        }
         Ok(())
     }
 
@@ -466,12 +544,8 @@ impl Link {
     }
 
     #[cfg(feature = "ble-gatt-dle")]
-    fn rx_airtime(&self) -> DataAirtime {
-        DataAirtime::new(
-            self.limits.rx_octets,
-            self.limits.rx_time,
-            self.phy.rx_two_m(),
-        )
+    fn rx_airtime(&self, two_m: bool) -> DataAirtime {
+        DataAirtime::new(self.limits.rx_octets, self.limits.rx_time, two_m)
     }
 
     fn expired(&self, now: u32) -> bool {
@@ -511,6 +585,8 @@ pub(super) struct Radio {
     advertisement: Option<Advertisement>,
     link: Option<Link>,
     pending: Option<SlotWatchdog>,
+    #[cfg(feature = "ble-gatt-dle")]
+    last_clock: u32,
     next_advertisement: u32,
     slot: u32,
     jitter: u32,
@@ -530,6 +606,8 @@ impl Radio {
             advertisement: None,
             link: None,
             pending: None,
+            #[cfg(feature = "ble-gatt-dle")]
+            last_clock: 0,
             next_advertisement: 0,
             slot: 0,
             jitter: 1,
@@ -645,7 +723,13 @@ impl Radio {
                     BoardEvent::Received(frame)
                 };
                 #[cfg(feature = "ble-gatt-dle")]
-                let observation = BoardEvent::Received(kind, length, packet.payload, self.session);
+                let observation = BoardEvent::Received {
+                    kind,
+                    len: length,
+                    buffer: packet.payload,
+                    session: self.session,
+                    rx_two_m: link.phy.rx_two_m(),
+                };
                 self.events.push(observation).map_err(|_| 22_u32)?;
             } else {
                 #[cfg(feature = "ble-gatt-dle")]
@@ -717,6 +801,10 @@ impl Radio {
             return Ok(());
         }
         let now = clock().ok_or(3_u32)?;
+        #[cfg(feature = "ble-gatt-dle")]
+        {
+            self.last_clock = now;
+        }
         if let Some(pending) = self.pending {
             if let Some(status) = read_end(self.slot)? {
                 diagnostic(32, status);
@@ -746,11 +834,24 @@ impl Radio {
         };
         *out = match event {
             BoardEvent::Connected(peer, params) => LinkEvent::Connected(peer, params),
-            BoardEvent::Received(kind, len, buffer, session) => {
+            BoardEvent::Received {
+                kind,
+                len,
+                buffer,
+                session,
+                rx_two_m,
+            } => {
                 if session != self.session {
                     return Err(21);
                 }
-                let limit = self.link.as_ref().ok_or(21_u32)?.rx_airtime().octets();
+                // Length updates are consumed in FIFO order. PHY instants run
+                // independently, so use the rate of the completed RX slot.
+                let limit = self
+                    .link
+                    .as_ref()
+                    .ok_or(21_u32)?
+                    .rx_airtime(rx_two_m)
+                    .octets();
                 let receiver = self.receiver.as_mut().ok_or(21_u32)?;
                 if len > limit {
                     buffer.release(receiver);
@@ -853,6 +954,11 @@ impl Radio {
             if !(1..HALF_CLOCK).contains(&ahead) {
                 diagnostic(31, start);
                 link.apply_map_at_instant();
+                // No slot will execute this event's CSA1 hop. Move the previous
+                // unmapped channel forward once, preserving the other link fields.
+                let hop_state = halfword(CONTROL + 0x18);
+                let next = ((hop_state & 0x3f) + u16::from(link.request.hop)) % 37;
+                set_halfword(CONTROL + 0x18, (hop_state & !0x3f) | next);
                 link.advance(None);
                 return self.expire_link(now);
             }
@@ -867,7 +973,10 @@ impl Radio {
                 }
                 let event = link.event;
                 #[cfg(feature = "ble-gatt-dle")]
-                let event = event.with_data_airtime(link.rx_airtime(), link.slot_tx_airtime());
+                let event = event.with_data_airtime(
+                    link.rx_airtime(link.phy.rx_two_m()),
+                    link.slot_tx_airtime(),
+                );
                 let duration = submit_link(self.slot, event, link.counter);
                 self.pending = Some(SlotWatchdog::new(start, duration));
             }
@@ -941,6 +1050,11 @@ impl LinkBackend for Radio {
     #[cfg(feature = "ble-gatt-dle")]
     fn supports_data_length(&self) -> bool {
         true
+    }
+
+    #[cfg(feature = "ble-gatt-dle")]
+    fn data_length_clock(&self) -> Option<u32> {
+        Some(self.last_clock)
     }
 
     #[cfg(feature = "ble-gatt-dle")]

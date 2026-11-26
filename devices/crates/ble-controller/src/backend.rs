@@ -102,8 +102,16 @@ pub trait LinkBackend: core::fmt::Debug {
         27
     }
     /// Whether the backend implements 251-octet TX, RX and negotiated airtime.
+    /// The Controller enables DLE when this is true and
+    /// [`data_length_clock`](Self::data_length_clock) supplies a clock.
     fn supports_data_length(&self) -> bool {
         false
+    }
+    /// Latest native Bluetooth clock sample (28-bit, one tick per 312.5 µs).
+    /// DLE backends return a clock even while idle and refresh it during radio
+    /// service. Without a clock the Controller cannot time local LL procedures.
+    fn data_length_clock(&self) -> Option<u32> {
+        None
     }
     /// Apply the effective limits in peripheral order to future radio PDUs.
     fn data_length_updated(&mut self, _limits: crate::DataLength) {}

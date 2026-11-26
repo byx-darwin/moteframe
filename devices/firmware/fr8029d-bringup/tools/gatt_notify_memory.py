@@ -290,9 +290,20 @@ def observe_log(path, image):
         if label in observations or image.stacks.get(label, (0, -1))[1] != reserve or touched > reserve:
             raise ValueError(f"{path}: invalid {label} reservation or watermark")
         observations[label] = touched
+    free = {label: image.stacks[label][1] - touched for label, touched in observations.items()}
+    guard = re.findall(r"^BLE_STACK_GUARD FREE=(\d+) MIN=(\d+)$", blob, re.M)
+    minimum = None
+    if guard:
+        if len(guard) != 1:
+            raise ValueError(f"{path}: expected one BLE task stack guard")
+        remaining, minimum = map(int, guard[0])
+        if remaining != free.get("ble") or minimum < 1 or remaining < minimum:
+            raise ValueError(f"{path}: BLE task stack guard failed or disagrees with watermark")
     notification_acked = bool(re.search(r"^NOTIFY_ACK SESSION=", blob, re.M))
     return {
         "last_session_stack_watermark_bytes": observations,
+        "stack_free_at_watermark_bytes": free,
+        "checked_minimum_ble_task_stack_free_bytes": minimum,
         "board_notification_observed": notification_acked or bool(
             re.search(r"^PHONE_NOTIFICATION_VERIFIED ", blob, re.M)
         ),

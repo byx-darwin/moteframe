@@ -36,6 +36,10 @@ impl LinkBackend for Backend {
     fn supports_data_length(&self) -> bool {
         self.0.borrow().lengths.is_some()
     }
+    #[cfg(feature = "data-length")]
+    fn data_length_clock(&self) -> Option<u32> {
+        Some(0)
+    }
     fn data_length_updated(&mut self, limits: DataLength) {
         self.0.borrow_mut().lengths = Some(limits);
     }
@@ -633,6 +637,7 @@ fn negotiates_and_transfers_full_hci_acl_payload_both_ways() {
         h.command(0x202f, &[]).unwrap().as_slice(),
         &[251, 0, 72, 8, 251, 0, 72, 8]
     );
+    let default = h.command(0x2023, &[]).unwrap();
     advertise(&h);
     b.0.borrow_mut().events.push_back(LinkEvent::Connected(
         Peer::new([7; 6], true),
@@ -642,6 +647,7 @@ fn negotiates_and_transfers_full_hci_acl_payload_both_ways() {
     run(h.read(&mut buf)).unwrap();
     let (token, request) = b.0.borrow().sent[0];
     assert_eq!(request.payload(), &[0x14, 251, 0, 72, 8, 251, 0, 72, 8]);
+    assert_eq!(&request.payload()[5..], default.as_slice());
     let rsp = LinkEvent::Received(
         LinkFrame::new(FrameKind::Control, &[0x15, 251, 0, 72, 8, 251, 0, 72, 8]).unwrap(),
     );
@@ -680,7 +686,7 @@ fn negotiates_and_transfers_full_hci_acl_payload_both_ways() {
 fn host_suggestions_survive_disconnect_and_reset_to_the_hci_default() {
     let (h, b) = setup();
     b.0.borrow_mut().lengths = Some(DataLength::MAX);
-    assert_eq!(h.command(0x2023, &[]).unwrap().as_slice(), &[27, 0, 72, 1]);
+    assert_eq!(h.command(0x2023, &[]).unwrap().as_slice(), &[251, 0, 72, 8]);
     assert!(h.command(0x2024, &[26, 0, 72, 8]).is_err());
     assert!(h.command(0x2024, &[251, 0, 71, 1]).is_err());
     let suggestion = [100, 0, 0x00, 0x10];
@@ -710,5 +716,5 @@ fn host_suggestions_survive_disconnect_and_reset_to_the_hci_default() {
         run(h.read(&mut buf)).unwrap();
     }
     run(Reset::new().exec(&h)).unwrap();
-    assert_eq!(h.command(0x2023, &[]).unwrap().as_slice(), &[27, 0, 72, 1]);
+    assert_eq!(h.command(0x2023, &[]).unwrap().as_slice(), &[251, 0, 72, 8]);
 }

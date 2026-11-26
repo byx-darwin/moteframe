@@ -171,6 +171,31 @@ cargo build --offline --locked --release --target thumbv8m.main-none-eabi \
 
 本地取证位于 `target/fr8029d-cold-rf-20261125`。`pre-app-v2-trim.log` 和 `pre-app-timing-word.log` 为基带时序配置对照，`phone/` 为单频道实验日志，`three-channels/` 对应手机验收的三频道实验。`xip-boot1/retest.IcWsZb/` 对应 Flash 冷启动复测、写保护检查和完整读回校验。
 
+## FR8029D 的 BLE 架构
+
+裸机版与 FreeRTOS 版共用下图中的 GATT 服务、Host、控制器和射频后端。实线沿发送方向标出各层使用的接口，接收的数据和事件沿相反方向返回。虚线标出回显服务直接使用的写入缓冲。[固件组装入口](src/gatt_runner.rs)
+
+```mermaid
+flowchart TD
+    G["FR8029D GATT 服务<br/>自定义回显服务、FFF0 兼容服务"]
+    M["moteframe-ble<br/>WriteSlot"]
+    H["TrouBLE Host<br/>由 ble-host-trouble 接入"]
+    C["ble-controller<br/>HCI 控制器与链路层逻辑"]
+    R["FR8029D 芯片后端<br/>Radio"]
+    G -.->|暂存回显特征的完整写入| M
+    G -->|GATT 属性与通知| H
+    H -->|HCI 命令与 ACL 数据| C
+    C -->|LinkBackend 接口| R
+```
+
+| Crate | 职责与依赖 |
+| --- | --- |
+| [moteframe-ble](../../../crates/moteframe-ble/README.md) | 框架层的 GATT 值处理工具，提供定长写入槽，以及可接入不同后端的通知校验接口。可独立于 Host 和控制器使用。 |
+| [ble-host-trouble](../../crates/ble-host-trouble/src/lib.rs) | 将上游 `trouble-host` 接入设备工程，配置 Host 的连接资源和包池，提供收发与控制任务的轮询入口。组装 Host 时接受实现控制器接口的类型，并复用 `ble-controller` 的 `RandomAddress`。 |
+| [ble-controller](../../crates/ble-controller/src/lib.rs) | 通过 `bt-hci` 向 Host 提供控制器接口，管理广播、连接、链路控制和有界收发队列。固件中的 `Radio` 实现它定义的 `LinkBackend`，负责 FR8029D 的射频调度与收发。[芯片后端实现](src/gatt_board_radio.rs) |
+
+以一次 20 字节回显为例，手机写入**自定义回显特征**后，GATT 服务用 `moteframe-ble` 的 `WriteSlot<u16, 20>` 暂存特征句柄和数据。固件取出本次写入的有效字节，调用 TrouBLE 的 `notify_raw()` 向已订阅的手机发送原值。SDK 兼容服务有独立的行为，订阅 FFF3 后发送固定的五字节通知 `01 02 03 04 05`。[GATT 服务实现](src/gatt.rs)
+
 ### 可连接广播与最小 GATT
 
 `ble-connect-probe` 从 SRAM 运行独立的 1M `ADV_IND`、扫描响应、连接请求接收和数据事件探针。`ble-gatt-board` 在同一板级初始化之上实现 `ble-controller::LinkBackend`，复用现有 HCI Controller 和 TrouBLE Host。GATT 接收的完整写入经 `moteframe_ble::WriteSlot` 交给应用。依赖只在启用 GATT 特性时引入。
@@ -209,6 +234,8 @@ FreeRTOS 事件驱动版在 Mac 首次连接和重连时，分别写入了两个
 
 裸机和 FreeRTOS 共用 `ble-gatt-dle` 编译开关。默认使用短包，单个链路层数据包最多 27 字节。开启后，每次连接仍从 27 字节起步，分别协商收、发方向的数据长度与时间，最高 251 字节、2,120 µs。LE 1M 和 LE 2M 都可以使用长包。现有 Rust 特征值单次写入和 Notify 回显仍为 1～20 字节。
 
+长包版复位后的 HCI 默认发送建议值为 251 字节、2,120 µs，与新连接主动发出的长度请求一致。Host 写入的建议值保留到控制器复位，应用到下一条连接时，发送时间受本机支持的上限 2,120 µs 约束。长度请求提交给基带后开始计时。正常收发时，若 40 秒内仍未处理到响应或拒绝，控制器以原因码 `0x22` 结束连接，GATT 可以重新广播。Host 接收队列满时，超时检查会推迟到队列腾出空间；每轮最多处理 8 个后端事件，截止时若响应仍排在本轮处理范围之外，可能提前判定超时。
+
 从本目录构建时选择运行环境和长包开关。以下命令生成事件驱动裸机长包版的 Flash ELF。标准版去掉 `ble-gatt-dle`。FreeRTOS 版追加 `ble-gatt-freertos` 并将 `FREERTOS_KERNEL_DIR` 指向 FreeRTOS-Kernel V11.2.0。
 
 ```sh
@@ -236,7 +263,9 @@ python3 tools/gatt_notify_memory.py flash-bin "$BOARD_FLASH_BACKUP" \
 | `FFF3` | `00 01 02 03 04` | 接受最多 20 字节的写入，写后读取仍返回固定值。开启 Notify 时收到 `01 02 03 04 05` |
 | `0783B03E-8535-B5A0-7140-A304F4FF5CBA` | `11 22 33 44 55` | 只读 |
 
-要验证写什么就回什么，选择原来的 `2f8029d1…b251` 特征。要对照 SDK 的固定响应，可在仓库根目录运行 `swift devices/scripts/ble_sdk_compat.swift FR29-GAT2`，FreeRTOS SRAM 版用 `FR29-RTOS`，SDK 对照板用 `802x_Ble_Periphreal`。
+要验证写什么就回什么，选择原来的 `2f8029d1…b251` 特征。要对照 SDK 的固定响应，可在仓库根目录运行 `swift devices/scripts/ble_sdk_compat.swift FR29-XN01` 验收裸机 Flash 版。裸机 SRAM 版用 `FR29-GAT2`，FreeRTOS 版用 `FR29-RTOS`，SDK 对照板用 `802x_Ble_Periphreal`。
+
+裸机长包 Flash 版已用同一台 Mac 验证断开重连、20 字节回显，并连续 8 次通过 FFF0 验收。J-Link 对照记录显示，错过一个连接时隙时，调度器需要同步推进 CSA1 的未映射频道。补上这一跳后，即使错过写请求之后的一个时隙，基带仍能在后续事件确认 FFF3 写响应，Mac 随后读回 SDK 约定的固定值。
 
 ### Mac 蓝牙验收
 
@@ -250,6 +279,7 @@ Mac 测试镜像请求 30 ms 的广播间隔，再加入基带调度所用的随
 
 ```sh
 swift devices/scripts/ble_connect.swift FR29-GAT2 --timeout 120
+swift devices/scripts/ble_connect.swift FR29-XN01 --timeout 120
 swift devices/scripts/ble_connect.swift FR29-RTOS --timeout 120
 ```
 
@@ -334,6 +364,10 @@ openocd -f firmware/fr8029d-bringup/tools/fr8029d_openocd.cfg \
 ```
 
 手机连接 `FR29-RTOS`，在同一个 GATT 特征值上开启 Notify，再以 Write Request 写入 UTF-8 文本 `FR29NT75-0123456789A`。验收以手机自动收到相同 20 字节和 J-Link 记录的板端通知为准。退出时脚本复位回原厂固件并核对 Flash 前 12 KiB。
+
+SRAM 验收从 FreeRTOS 的 BLE 任务栈预留量减去实测水位，输出 `BLE_STACK_GUARD FREE=… MIN=…`。默认至少保留 512 B，低于门槛时脚本在恢复原厂并校验后返回失败。需要更高余量时，可用第四个参数指定字节数，例如 `run_notify_trial 120 /tmp/fr29-stock-prefix.bin 2 768`。水位只覆盖本轮执行路径，中断主栈和 Idle 栈分别记录。
+
+2026-11-26 的满长包复测使用临时的 244 字节 GATT 测试值。Mac 在首次连接和重连后均写入并收到逐字节一致的 Notify，基带记录了 251 字节的 RX、TX 和 TX 确认。FreeRTOS 事件驱动 SRAM 镜像的 BLE 栈在固定 1M、协商到 2M 时分别余下 736 B、768 B，轮询镜像分别余下 3,208 B、3,176 B。
 
 分别用 `ble-gatt-xip` 和 `ble-gatt-freertos,ble-gatt-xip` 构建 Flash 执行版，交给 `gatt_notify_memory.py compare <裸机 ELF> <FreeRTOS ELF>` 比较 Flash 负载和 SRAM 预留。栈用量取自 SRAM 实验的填充值覆盖深度。
 

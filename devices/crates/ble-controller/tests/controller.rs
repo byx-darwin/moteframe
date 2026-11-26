@@ -9,6 +9,8 @@ struct Backend {
     sent: Vec<(u32, LinkFrame)>,
     #[cfg(feature = "data-length")]
     maintenance: usize,
+    #[cfg(feature = "data-length")]
+    clock: u32,
     busy: bool,
     fail: bool,
     short_fragments: bool,
@@ -24,6 +26,10 @@ impl LinkBackend for Backend {
     }
     fn supports_data_length(&self) -> bool {
         self.lengths.is_some()
+    }
+    #[cfg(feature = "data-length")]
+    fn data_length_clock(&self) -> Option<u32> {
+        Some(self.clock)
     }
     fn data_length_updated(&mut self, limits: DataLength) {
         self.lengths = Some(limits);
@@ -78,16 +84,18 @@ impl LinkBackend for Backend {
         Ok(())
     }
 }
-fn connected() -> Controller<Backend> {
-    let mut core = Controller::new(Backend::default(), Version::new(0xff, 0xffff, 1));
-    core.reset().unwrap();
-    let advertisement = Advertisement::new(
+fn advertisement() -> Advertisement {
+    Advertisement::new(
         RandomAddress::new([1, 2, 3, 4, 5, 0xc0]).unwrap(),
         AdvertisingParameters::new(160, 160, 7).unwrap(),
         AdvertisingData::new(&[]).unwrap(),
         AdvertisingData::new(&[]).unwrap(),
-    );
-    core.advertise(advertisement).unwrap();
+    )
+}
+fn connected() -> Controller<Backend> {
+    let mut core = Controller::new(Backend::default(), Version::new(0xff, 0xffff, 1));
+    core.reset().unwrap();
+    core.advertise(advertisement()).unwrap();
     core.backend_mut().events.push_back(LinkEvent::Connected(
         Peer::new([1; 6], false),
         ConnectionParameters::new(24, 0, 72).unwrap(),
@@ -229,7 +237,7 @@ fn test_should_bound_host_credits_and_process_control_without_host_acl_credit() 
 }
 
 #[test]
-fn test_should_fault_on_control_overflow_instead_of_blocking_ack_processing_forever() {
+fn control_queue_exhaustion_ends_only_the_connection() {
     let mut core = connected();
     let id = core.connection().unwrap();
     for n in 0..4 {
@@ -240,8 +248,62 @@ fn test_should_fault_on_control_overflow_instead_of_blocking_ack_processing_fore
             LinkFrame::new(FrameKind::Control, &[0xff]).unwrap(),
         ));
     }
-    assert!(core.service().is_err());
+    core.service().unwrap();
+    assert_eq!(
+        core.next_event(),
+        Some(ControllerEvent::Disconnected { id, reason: 0x16 })
+    );
+    assert!(core.connection().is_none());
+    assert_eq!(core.pending_acl(), 0);
+    core.advertise(advertisement()).unwrap();
+    core.backend_mut().events.push_back(LinkEvent::Connected(
+        Peer::new([2; 6], false),
+        ConnectionParameters::new(24, 0, 72).unwrap(),
+    ));
+    core.service().unwrap();
+    let next = core.connection().unwrap();
+    assert_ne!(id, next);
+    core.send_acl(next, frame(1)).unwrap();
+    assert_eq!(core.send_acl(id, frame(1)), Err(ControllerError::State));
 }
+#[test]
+fn local_disconnect_with_full_control_fifo_preserves_inflight_ack() {
+    let mut core = connected();
+    let id = core.connection().unwrap();
+    core.send_acl(id, frame(9)).unwrap();
+    core.service().unwrap();
+    let flight = core.backend_mut().sent[0].0;
+    let features = LinkFrame::new(FrameKind::Control, &[8, 0, 0, 0, 0, 0, 0, 0, 0]).unwrap();
+    for _ in 0..8 {
+        core.backend_mut()
+            .events
+            .push_back(LinkEvent::Received(features));
+    }
+    core.service().unwrap();
+    core.disconnect(id, 0x13).unwrap();
+    core.service().unwrap();
+    assert_eq!(core.backend_mut().sent.len(), 1);
+    core.backend_mut()
+        .events
+        .push_back(LinkEvent::Acknowledged(flight));
+    core.service().unwrap();
+    assert_eq!(
+        core.next_event(),
+        Some(ControllerEvent::Completed { id, packets: 1 })
+    );
+    let (token, term) = core.backend_mut().sent[1];
+    assert_eq!(term.payload(), [2, 0x13]);
+    core.backend_mut()
+        .events
+        .push_back(LinkEvent::Acknowledged(token));
+    core.service().unwrap();
+    assert_eq!(
+        core.next_event(),
+        Some(ControllerEvent::Disconnected { id, reason: 0x16 })
+    );
+    core.advertise(advertisement()).unwrap();
+}
+
 #[test]
 fn test_should_reject_truncated_known_control_procedures() {
     let mut core = connected();
@@ -491,4 +553,70 @@ fn ignores_unsolicited_length_response_while_hardware_has_not_committed_request(
     core.backend_mut().busy = false;
     core.service().unwrap();
     assert_eq!(core.backend_mut().sent[0].1.payload()[0], 0x14);
+}
+
+#[cfg(feature = "data-length")]
+#[test]
+fn unanswered_length_request_expires_only_after_admission_across_clock_wrap() {
+    const START: u32 = 0x0fff_ff00;
+    let mut core = connected();
+    let id = core.connection().unwrap();
+    core.backend_mut().lengths = Some(DataLength::LEGACY);
+    core.backend_mut().busy = true;
+    core.service().unwrap();
+    core.backend_mut().clock = START;
+    core.backend_mut().busy = false;
+    core.service().unwrap();
+    let (token, request) = core.backend_mut().sent[0];
+    assert_eq!(request.payload()[0], 0x14);
+    core.backend_mut()
+        .events
+        .push_back(LinkEvent::Acknowledged(token));
+    core.backend_mut().clock = (START + 127_999) & 0x0fff_ffff;
+    core.service().unwrap();
+    assert_eq!(core.connection(), Some(id));
+    core.backend_mut().clock += 1;
+    core.service().unwrap();
+    assert_eq!(
+        core.next_event(),
+        Some(ControllerEvent::Disconnected { id, reason: 0x22 })
+    );
+    core.advertise(advertisement()).unwrap();
+    core.backend_mut().events.push_back(LinkEvent::Connected(
+        Peer::new([1; 6], false),
+        ConnectionParameters::new(24, 0, 72).unwrap(),
+    ));
+    core.service().unwrap();
+    let next_id = core.connection().unwrap();
+    assert_ne!(next_id, id);
+    let (next_token, request) = core.backend_mut().sent[1];
+    assert_eq!(request.payload()[0], 0x14);
+    let response =
+        LinkFrame::new(FrameKind::Control, &[0x15, 251, 0, 72, 8, 251, 0, 72, 8]).unwrap();
+    core.backend_mut().events.extend([
+        LinkEvent::Acknowledged(next_token),
+        LinkEvent::Received(response),
+    ]);
+    core.service().unwrap();
+    assert_eq!(core.backend_mut().lengths, Some(DataLength::MAX));
+}
+
+#[cfg(feature = "data-length")]
+#[test]
+fn length_response_in_the_receive_queue_cancels_timeout() {
+    let mut core = connected();
+    let id = core.connection().unwrap();
+    core.backend_mut().lengths = Some(DataLength::LEGACY);
+    core.service().unwrap();
+    let token = core.backend_mut().sent[0].0;
+    let rsp = LinkFrame::new(FrameKind::Control, &[0x15, 251, 0, 72, 8, 251, 0, 72, 8]).unwrap();
+    core.backend_mut()
+        .events
+        .extend([LinkEvent::Acknowledged(token), LinkEvent::Received(rsp)]);
+    core.backend_mut().clock = 128_000;
+    core.service().unwrap();
+    core.backend_mut().clock += 128_000;
+    core.service().unwrap();
+    assert_eq!(core.connection(), Some(id));
+    assert_eq!(core.backend_mut().lengths, Some(DataLength::MAX));
 }

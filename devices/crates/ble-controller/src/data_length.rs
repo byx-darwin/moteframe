@@ -74,7 +74,7 @@ impl DataLength {
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum Procedure {
     Wanted,
-    Waiting,
+    Waiting(u32),
     Idle,
     Unsupported,
 }

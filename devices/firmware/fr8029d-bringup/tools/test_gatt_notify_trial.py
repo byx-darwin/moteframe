@@ -2,15 +2,52 @@
 from pathlib import Path
 import shutil
 import subprocess
+from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 import unittest
+
+
+from gatt_notify_memory import observe_log
 
 
 TCLSH = shutil.which("tclsh")
 TOOLS = Path(__file__).resolve().parent
 
 
+class StackReportTests(unittest.TestCase):
+    def test_matched_elf_watermark_and_ble_guard(self):
+        image = SimpleNamespace(digest="a" * 64, stacks={"ble": (0, 4096)})
+        with TemporaryDirectory() as tmp:
+            log = Path(tmp) / "trial.log"
+            prefix = (f"NOTIFY_TRIAL FR29-RTOS ELF_SHA256={image.digest}\n"
+                      "STACK_WATERMARK ble RESERVE=4096 TOUCHED=3584\n")
+            log.write_text(prefix)  # Historical trial without an acceptance threshold.
+            self.assertIsNone(observe_log(log, image)["checked_minimum_ble_task_stack_free_bytes"])
+            log.write_text(prefix + "BLE_STACK_GUARD FREE=512 MIN=512\n")
+            report = observe_log(log, image)
+            self.assertEqual(report["stack_free_at_watermark_bytes"], {"ble": 512})
+            self.assertEqual(report["checked_minimum_ble_task_stack_free_bytes"], 512)
+            for guard in ["FREE=512 MIN=516", "FREE=516 MIN=512"]:
+                log.write_text(prefix + f"BLE_STACK_GUARD {guard}\n")
+                with self.assertRaises(ValueError):
+                    observe_log(log, image)
+
+
 @unittest.skipUnless(TCLSH, "tclsh is required to exercise the SWD observer")
 class NotifyTrialTests(unittest.TestCase):
+    def test_ble_stack_guard_rejects_only_margins_below_the_minimum(self):
+        for remaining, expected in [(0, 1), (508, 1), (512, 0), (516, 0)]:
+            with self.subTest(remaining=remaining):
+                result = subprocess.run(
+                    [TCLSH], cwd=TOOLS, text=True, capture_output=True, check=True,
+                    input=f"""source gatt_notify_sram_trial.tcl
+proc echo {{message}} {{puts $message}}
+puts [catch {{notify_check_ble_stack {remaining} 512}}]
+""",
+                )
+                self.assertIn(f"BLE_STACK_GUARD FREE={remaining} MIN=512", result.stdout)
+                self.assertEqual(result.stdout.splitlines()[-1], str(expected))
+
     def test_reports_event_wake_counters_only_for_the_event_image(self):
         result = subprocess.run(
             [TCLSH],

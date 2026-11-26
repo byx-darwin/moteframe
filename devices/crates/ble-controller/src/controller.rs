@@ -165,7 +165,7 @@ pub struct Controller<B: LinkBackend> {
     #[cfg(feature = "data-length")]
     lengths: LengthState,
     #[cfg(feature = "data-length")]
-    pub(crate) suggested_length: Option<DataLength>,
+    pub(crate) suggested_length: DataLength,
 }
 impl<B: LinkBackend> Controller<B> {
     /// Owns the backend; call reset before the first operation.
@@ -193,7 +193,7 @@ impl<B: LinkBackend> Controller<B> {
             #[cfg(feature = "data-length")]
             lengths: LengthState::new(DataLength::MAX),
             #[cfg(feature = "data-length")]
-            suggested_length: None,
+            suggested_length: DataLength::MAX,
         }
     }
     pub(crate) const fn initialized(&self) -> bool {
@@ -226,7 +226,9 @@ impl<B: LinkBackend> Controller<B> {
         ]
     }
     pub(crate) fn supports_data_length(&self) -> bool {
-        cfg!(feature = "data-length") && self.backend.supports_data_length()
+        cfg!(feature = "data-length")
+            && self.backend.supports_data_length()
+            && self.backend.data_length_clock().is_some()
     }
 
     /// Backend access for board scheduling; do not mutate active hardware outside this Controller.
@@ -264,7 +266,7 @@ impl<B: LinkBackend> Controller<B> {
             .ok_or(ControllerError::Capacity)?;
         #[cfg(feature = "data-length")]
         {
-            self.suggested_length = None;
+            self.suggested_length = DataLength::MAX;
         }
         self.clear_link();
         self.events.clear();
@@ -281,7 +283,7 @@ impl<B: LinkBackend> Controller<B> {
         self.version_sent = false;
         #[cfg(feature = "data-length")]
         {
-            self.lengths = LengthState::new(self.suggested_length.unwrap_or(DataLength::MAX));
+            self.lengths = LengthState::new(self.suggested_length);
         }
     }
     pub(crate) fn check(&self) -> Result<(), ControllerError<B::Error>> {
@@ -361,7 +363,7 @@ impl<B: LinkBackend> Controller<B> {
     }
     /// Queues link termination; completion waits for an actual peer ACK.
     /// # Errors
-    /// Rejects stale state or insufficient queue capacity.
+    /// Rejects stale state. A full FIFO yields its unsent entries to termination.
     pub fn disconnect(
         &mut self,
         id: ConnectionId,
@@ -370,6 +372,11 @@ impl<B: LinkBackend> Controller<B> {
         self.check()?;
         if self.connection != Some(id) {
             return Err(ControllerError::State);
+        }
+        if self.tx.is_full() {
+            // The descriptor already in flight retains its token. Unsent ACLs
+            // receive no completion credit and are retired with this connection.
+            self.tx.clear();
         }
         self.control(&[2, reason], true)
     }
@@ -433,7 +440,7 @@ impl<B: LinkBackend> Controller<B> {
     ) -> Result<(), ControllerError<B::Error>> {
         if matches!(
             self.lengths.procedure,
-            Procedure::Waiting | Procedure::Unsupported
+            Procedure::Waiting(_) | Procedure::Unsupported
         ) {
             return Err(ControllerError::State);
         }
@@ -449,7 +456,7 @@ impl<B: LinkBackend> Controller<B> {
         opcode: u8,
         bytes: &[u8],
     ) -> Result<(), ControllerError<B::Error>> {
-        if opcode == 0x15 && self.lengths.procedure != Procedure::Waiting {
+        if opcode == 0x15 && !matches!(self.lengths.procedure, Procedure::Waiting(_)) {
             return Ok(());
         }
         let Some(peer) = DataLength::from_peer(bytes) else {
@@ -463,7 +470,7 @@ impl<B: LinkBackend> Controller<B> {
             self.control(&self.lengths.local.control(0x15), false)?;
         }
         // A simultaneous remote request does not complete our outstanding request.
-        if opcode == 0x15 || self.lengths.procedure != Procedure::Waiting {
+        if opcode == 0x15 || !matches!(self.lengths.procedure, Procedure::Waiting(_)) {
             self.lengths.procedure = Procedure::Idle;
         }
         self.lengths.peer = peer;
@@ -509,7 +516,7 @@ impl<B: LinkBackend> Controller<B> {
             }
             #[cfg(feature = "data-length")]
             [0x07, 0x14] | [0x11, 0x14, _] | [0x0d, _]
-                if self.lengths.procedure == Procedure::Waiting =>
+                if matches!(self.lengths.procedure, Procedure::Waiting(_)) =>
             {
                 self.lengths.procedure = if matches!(payload, [0x07, _] | [0x11, _, 0x1a]) {
                     Procedure::Unsupported
@@ -596,8 +603,7 @@ impl<B: LinkBackend> Controller<B> {
                 };
                 #[cfg(feature = "data-length")]
                 if self.supports_data_length() {
-                    self.lengths =
-                        LengthState::new(self.suggested_length.unwrap_or(DataLength::MAX));
+                    self.lengths = LengthState::new(self.suggested_length);
                     self.backend.data_length_updated(DataLength::LEGACY);
                 }
                 self.connection = Some(id);
@@ -628,7 +634,14 @@ impl<B: LinkBackend> Controller<B> {
             LinkEvent::Received(ref frame) => {
                 if let Some(id) = self.connection {
                     if frame.kind() == FrameKind::Control {
-                        self.receive_control(frame.payload())?;
+                        match self.receive_control(frame.payload()) {
+                            Err(ControllerError::Capacity) if self.tx.is_full() => {
+                                // We cannot retain this mandatory reply. Stop only this
+                                // link; advance reserved a Host event for its disconnect.
+                                return self.end(0x16);
+                            }
+                            result => result?,
+                        }
                     } else if !frame.payload().is_empty() {
                         #[cfg(feature = "data-length")]
                         if frame.payload().len() > usize::from(self.lengths.effective.rx_octets) {
@@ -661,7 +674,7 @@ impl<B: LinkBackend> Controller<B> {
     }
     fn queue_local_control(&mut self) -> Result<(), ControllerError<B::Error>> {
         #[cfg(feature = "data-length")]
-        if self.supports_data_length() && self.lengths.procedure == Procedure::Waiting {
+        if self.supports_data_length() && matches!(self.lengths.procedure, Procedure::Waiting(_)) {
             return Ok(());
         }
         if self.backend.take_feature_query() {
@@ -678,11 +691,13 @@ impl<B: LinkBackend> Controller<B> {
     }
     #[cfg(feature = "data-length")]
     fn transmit_next(&mut self, fragment_limit: u8) -> Result<(), ControllerError<B::Error>> {
-        let local_request = self.supports_data_length()
+        let request_clock = (self.backend.supports_data_length()
             && self.lengths.procedure == Procedure::Wanted
-            && self.tx.is_empty();
+            && self.tx.is_empty())
+        .then(|| self.backend.data_length_clock())
+        .flatten();
         let request;
-        let fragment = if local_request {
+        let fragment = if request_clock.is_some() {
             request = self.lengths.local.control(0x14);
             TxFragment::control(&request, false, false)
         } else if let Some(fragment) = self.tx.next(fragment_limit) {
@@ -703,8 +718,8 @@ impl<B: LinkBackend> Controller<B> {
                 host: fragment.completes_host,
                 terminate: fragment.terminate,
             });
-            if local_request {
-                self.lengths.procedure = Procedure::Waiting;
+            if let Some(start) = request_clock {
+                self.lengths.procedure = Procedure::Waiting(start);
             } else {
                 let consumed =
                     u8::try_from(fragment.payload.len()).map_err(|_| ControllerError::Protocol)?;
@@ -714,7 +729,7 @@ impl<B: LinkBackend> Controller<B> {
         Ok(())
     }
     fn advance(&mut self) -> Result<(), ControllerError<B::Error>> {
-        // Keep room for an observation; TX saturation faults rather than hiding ACKs.
+        // Leave room for the Host observation, including a local disconnect.
         #[cfg(feature = "data-length")]
         let mut event = LinkEvent::Disconnected(0);
         for _ in 0..8 {
@@ -738,6 +753,15 @@ impl<B: LinkBackend> Controller<B> {
                 break;
             };
             self.observe(&event)?;
+        }
+        #[cfg(feature = "data-length")]
+        if !self.events.is_full()
+            && let Procedure::Waiting(start) = self.lengths.procedure
+            && let Some(now) = self.backend.data_length_clock()
+            && (now.wrapping_sub(start) & 0x0fff_ffff) >= 128_000
+        {
+            // LL response timeout is 40 s, independent of supervision traffic.
+            return self.end(0x22);
         }
         if self.connection.is_some() && !self.tx.is_full() {
             self.queue_local_control()?;

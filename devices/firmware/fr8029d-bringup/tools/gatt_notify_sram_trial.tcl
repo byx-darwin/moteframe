@@ -164,7 +164,15 @@ proc restore_notify_stock {prefix_path} {
     echo "STOCK_RESTORED FLASH_PREFIX_BYTES=12288"
 }
 
-proc run_notify_trial {seconds {prefix_path {}} {sessions 1}} {
+proc notify_check_ble_stack {free minimum} {
+    echo "BLE_STACK_GUARD FREE=$free MIN=$minimum"
+    if {$free < $minimum} {error "BLE task stack has $free bytes free, requires $minimum"}
+}
+
+proc run_notify_trial {seconds {prefix_path {}} {sessions 1} {minimum_ble_free 512}} {
+    if {![string is integer -strict $minimum_ble_free] || $minimum_ble_free <= 0} {
+        error "Provide a positive minimum BLE task stack margin in bytes"
+    }
     if {![string is integer -strict $seconds] || $seconds <= 0} {
         error "Provide a positive trial duration in seconds"
     }
@@ -238,7 +246,9 @@ proc run_notify_trial {seconds {prefix_path {}} {sessions 1}} {
                 lassign $stack label base size paint
                 set touched [notify_stack_touched $base $size $paint]
                 echo "STACK_WATERMARK $label RESERVE=$size TOUCHED=$touched"
+                if {$label eq "ble"} {set ble_free [expr {$size - $touched}]}
             }
+            if {[info exists ble_free]} {notify_check_ble_stack $ble_free $minimum_ble_free}
         } sample_error]
         if {$sample_failure} {
             echo "STACK_WATERMARK_FAILED $sample_error"

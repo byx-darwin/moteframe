@@ -124,7 +124,7 @@ impl<B: LinkBackend> HciState<B> {
             }
             0x2023 => {
                 length(p, 0)?;
-                let suggested = self.core.suggested_length.unwrap_or(DataLength::LEGACY);
+                let suggested = self.core.suggested_length;
                 let [octets_lo, octets_hi] = suggested.tx_octets.to_le_bytes();
                 let [time_lo, time_hi] = suggested.tx_time.to_le_bytes();
                 Ok(CommandReply::new(&[octets_lo, octets_hi, time_lo, time_hi]))
@@ -135,11 +135,11 @@ impl<B: LinkBackend> HciState<B> {
                 if !DataLength::valid_pair(octets, time) {
                     return Err(Status::INVALID_HCI_PARAMETERS.into());
                 }
-                self.core.suggested_length = Some(DataLength {
+                self.core.suggested_length = DataLength {
                     tx_octets: octets,
                     tx_time: time,
                     ..DataLength::MAX
-                });
+                };
                 Ok(CommandReply::new(&[]))
             }
             _ => {

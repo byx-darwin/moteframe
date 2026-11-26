@@ -41,6 +41,7 @@ enum AdvertisementMatch: String {
 enum ProbeProfile: String {
     case rustLink = "RUST-LINK"
     case bare = "FR29-GAT2"
+    case bareFlash = "FR29-XN01"
     case freeRTOS = "FR29-RTOS"
 
     private static let bareMarker = Data([0xff, 0xff] + Array("MFR29A1".utf8))
@@ -51,8 +52,13 @@ enum ProbeProfile: String {
     func matchAdvertisement(localName: String?, manufacturerData: Data?) -> AdvertisementMatch? {
         if self != .rustLink,
            manufacturerData == Self.bareMarker || manufacturerData == Self.freeRTOSMarker {
-            let expected = self == .bare ? Self.bareMarker : Self.freeRTOSMarker
-            return manufacturerData == expected ? .manufacturerData : nil
+            switch self {
+            case .bare where manufacturerData == Self.bareMarker,
+                 .freeRTOS where manufacturerData == Self.freeRTOSMarker:
+                return .manufacturerData
+            default:
+                return nil
+            }
         }
         return localName == rawValue ? .localName : nil
     }
@@ -80,7 +86,7 @@ enum ProbeProfile: String {
 }
 
 struct ProbeOptions {
-    static let usage = "Usage: ble_connect.swift [RUST-LINK|FR29-GAT2|FR29-RTOS] [--timeout SECONDS]"
+    static let usage = "Usage: ble_connect.swift [RUST-LINK|FR29-GAT2|FR29-XN01|FR29-RTOS] [--timeout SECONDS]"
     let probe: ProbeProfile
     let timeout: Int
 
@@ -353,11 +359,18 @@ func testProbeAdvertisementMatching() {
     precondition(ProbeProfile.freeRTOS.matchAdvertisement(localName: "FR29-RTOS", manufacturerData: bare) == nil)
     precondition(ProbeProfile.bare.matchAdvertisement(localName: nil, manufacturerData: Data(bare.dropLast())) == nil)
     precondition(ProbeProfile.bare.matchAdvertisement(localName: "FR29-GAT2", manufacturerData: nil) == .localName)
+    precondition(ProbeProfile.bareFlash.matchAdvertisement(localName: "FR29-XN01", manufacturerData: nil) == .localName)
+    precondition(ProbeProfile.bareFlash.matchAdvertisement(localName: "FR29-GAT2", manufacturerData: nil) == nil)
+    for marker in [bare, freeRTOS] {
+        precondition(ProbeProfile.bareFlash.matchAdvertisement(localName: nil, manufacturerData: marker) == nil)
+        precondition(ProbeProfile.bareFlash.matchAdvertisement(localName: "FR29-XN01", manufacturerData: marker) == nil)
+    }
     precondition(ProbeProfile.rustLink.matchAdvertisement(localName: "RUST-LINK", manufacturerData: nil) == .localName)
     precondition(ProbeProfile.rustLink.matchAdvertisement(localName: nil, manufacturerData: bare) == nil)
 }
 
 func testProbeExchanges() {
+    precondition(ProbeOptions.parse(["FR29-XN01"])?.probe == .bareFlash)
     precondition(ProbeOptions.parse([])?.probe == .rustLink)
     precondition(ProbeOptions.parse(["FR29-GAT2", "--timeout", "12"])?.timeout == 12)
     precondition(ProbeOptions.parse(["802x_Ble_Periphreal"]) == nil)
@@ -370,7 +383,7 @@ func testProbeExchanges() {
     precondition(legacy.observe(Data([0xa5, 0x5a, 0x10, 0x20, 0x30, 0x40, 0x50, 0x60])))
     precondition(legacy.isVerified)
 
-    for probe in [ProbeProfile.bare, .freeRTOS] {
+    for probe in [ProbeProfile.bare, .bareFlash, .freeRTOS] {
         var first = probe.exchange(round: 1)
         var second = probe.exchange(round: 2)
         precondition(probe.rounds == 2 && first.request.count == 20 && second.request.count == 20)
