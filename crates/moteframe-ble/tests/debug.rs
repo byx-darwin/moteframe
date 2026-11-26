@@ -34,3 +34,12 @@ fn debug_omits_current_cleared_taken_and_reused_payloads() {
         }
     }
 }
+
+#[test]
+fn write_metadata_only_displays_length() {
+    let meta = moteframe_ble::WriteMeta {
+        target: "private-route",
+        length: 3,
+    };
+    assert_eq!(format!("{meta:?}"), "WriteMeta { length: 3, .. }");
+}

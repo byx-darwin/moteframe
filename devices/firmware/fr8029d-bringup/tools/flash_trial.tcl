@@ -219,7 +219,7 @@ proc flash_trial {action original candidate ota helper} {
         stig 0x9fa00000
         if {([word 0xe00a40a0] & 0xffffff) != 0x146085} { error "Flash JEDEC differs" }
         set initial_sr1 [ready]
-        if {($initial_sr1 != 0x7c && !($action eq "restore" && $initial_sr1 == 0)) || [status2] != 2} {
+        if {($initial_sr1 != 0x7c && !($action eq "restore" && ($initial_sr1 == 0 || $initial_sr1 == 2))) || [status2] != 2} {
             error "Starting Flash protection differs"
         }
 
@@ -240,9 +240,13 @@ proc flash_trial {action original candidate ota helper} {
             set needs_write [restore_needed $app $header $original $candidate]
         }
         # Claim an already-unlocked device only after its sectors match this package.
-        set reprotect [expr {$needs_write || $initial_sr1 == 0}]
+        set reprotect [expr {$needs_write || $initial_sr1 != 0x7c}]
+        if {$initial_sr1 == 2} {
+            stig 0x04000000
+            if {[ready] != 0} { error "Flash write-enable latch did not clear" }
+        }
         if {$needs_write} {
-            if {$initial_sr1 != 0} { set_volatile_protection 0 }
+            if {$initial_sr1 == 0x7c} { set_volatile_protection 0 }
             if {$action eq "install"} {
                 install_pair $original $candidate
             } else {

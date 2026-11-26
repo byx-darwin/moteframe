@@ -73,7 +73,7 @@ proc get_reg {args} {
 }
 proc status1 {} { return [expr {$::sr1 | $::wel}] }
 proc status2 {} { return 2 }
-proc ready {} { return $::sr1 }
+proc ready {} { return [status1] }
 proc set_volatile_protection {value} {
     lappend ::protections $value
     if {$value == 0x7c && $::fail_reprotect} { error "protection readback failed" }
@@ -89,6 +89,7 @@ proc put_word {address value} {
 proc stig {command} {
     switch -- $command {
         0x9fa00000 {}
+        0x04000000 { set ::wel 0 }
         0x06000000 {
             check {$::sr1 == 0}
             set ::wel 2
@@ -275,7 +276,7 @@ foreach {header expected_erases} [list $partial {0} $stock_header {}] {
     check {$sr1 == 0x7c && $resets == 1}
 }
 foreach {action initial header metadata} [list \
-        install 0 $stock_header $ota restore 2 $stock_header $ota \
+        install 0 $stock_header $ota install 2 $stock_header $ota \
         restore 0x3c $stock_header $ota restore 0 $unknown $ota \
         restore 0 $stock_header $unknown] {
     start_trial $stock_app $header
@@ -283,5 +284,20 @@ foreach {action initial header metadata} [list \
     set sectors(4096) $metadata
     check {[catch {trial $action}]}
     check {$protections eq {} && $erases eq {} && $resets == 0}
+}
+# Reconnect after WREN, before erase. Keep the latch on a package mismatch.
+foreach {app matches} [list $unknown 0 $probe_app 1] {
+    start_trial $app $probe_header
+    set sr1 0
+    stig 0x06000000
+    if {$matches} {
+        trial restore
+        check {$erases eq {8192 0} && $resets == 1 && $sr1 == 0x7c && !$wel}
+        check {$sectors(8192) eq $stock_app && $sectors(0) eq $stock_header}
+    } else {
+        check {[catch {trial restore}]}
+        check {$wel == 2 && $protections eq {} && $erases eq {} && $resets == 0}
+        check {$sectors(8192) eq $app && $sectors(0) eq $probe_header}
+    }
 }
 puts "Interrupted restore, idempotence and preflight guards passed."

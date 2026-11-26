@@ -157,10 +157,14 @@ impl NotificationBackend for LinkModel {
     type Target = Target;
     type Error = Error;
     fn notification_capacity(&self, target: Target) -> Result<usize, Error> {
-        if self.valid(target) {
+        if !self.valid(target) {
+            return Err(Error::Stale);
+        }
+        // Preserve invalid ATT capacities for the service's fault-injection path.
+        if self.capacity > 512 {
             Ok(self.capacity)
         } else {
-            Err(Error::Stale)
+            Ok(self.capacity.min(self.last.len()))
         }
     }
     fn try_queue_notification(&mut self, target: Target, value: &[u8]) -> Result<(), Error> {
@@ -169,10 +173,8 @@ impl NotificationBackend for LinkModel {
             self.shrink_on_submit = false;
             self.capacity = 1;
         }
-        if !self.valid(target) {
-            return Err(Error::Stale);
-        }
-        if value.len() > self.capacity {
+        let capacity = self.notification_capacity(target)?;
+        if capacity > 512 || value.len() > capacity {
             return Err(Error::Capacity);
         }
         if self.blocks > 0 {

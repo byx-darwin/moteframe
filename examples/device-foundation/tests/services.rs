@@ -366,3 +366,21 @@ fn subscription_generation_exhaustion_never_wraps_or_reenables() {
     round(&mut s);
     assert!(!s.snapshot().connected);
 }
+
+#[test]
+fn model_caps_notifications_at_backing_storage() {
+    use moteframe_ble::NotificationBackend;
+    use moteframe_device_foundation::{VALUE_BYTES, model::Error};
+    let mut link = LinkModel::new();
+    link.capacity = VALUE_BYTES + 1;
+    assert_eq!(link.notification_capacity(link.target), Ok(VALUE_BYTES));
+    assert_eq!(
+        link.try_queue_notification(link.target, &[0; VALUE_BYTES + 1]),
+        Err(Error::Capacity)
+    );
+    assert_eq!(link.accepted, 0);
+    assert_eq!(
+        link.try_queue_notification(link.target, &[1; VALUE_BYTES]),
+        Ok(())
+    );
+}

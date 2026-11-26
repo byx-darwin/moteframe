@@ -191,12 +191,20 @@ impl<B: NotificationBackend> CheckedNotifier<B> {
 }
 
 /// Original routing identity and complete length of a committed write event.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub struct WriteMeta<T> {
     /// Target identity supplied with the event, never relabeled by the slot.
     pub target: T,
     /// Complete event length in bytes, including a legitimate zero length.
     pub length: usize,
+}
+
+impl<T> fmt::Debug for WriteMeta<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("WriteMeta")
+            .field("length", &self.length)
+            .finish_non_exhaustive()
+    }
 }
 
 /// Nondestructive rejection of a write-slot operation.

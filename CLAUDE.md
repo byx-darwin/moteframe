@@ -1,14 +1,13 @@
 # MoteFrame contributor and agent rules
 
-- Scope: portable interfaces, drawing, generic display transport, buses,
-  read-only storage views, bounded BLE value handling, source-backed assets and normalized input state machines.
-- Keep runtime crates `no_std`, allocation-free, and `forbid(unsafe_code)`.
-- Product applications, chip registers, board wiring, radio implementations,
-  panel-specific initialization, original assets, vendor files, and device dumps
-  belong outside this repository.
-- Storage/BLE here are portable sources/views and checked application-value
-  adapters. Physical Flash drivers, BLE host/controller/radio stacks, pairing,
-  private product protocols and business persistence remain outside this repo.
+- Portable framework crates in `crates/` cover interfaces, drawing, display
+  transport, buses, read-only storage views, bounded BLE values, assets, and input.
+  Keep these runtime crates `no_std`, allocation-free, and `forbid(unsafe_code)`.
+- Shared BLE host/controller integration belongs in `devices/crates/`. FR8029D
+  registers, wiring, radio, Flash drivers, and runtime integration belong in
+  `devices/firmware/fr8029d-bringup/`. Keep these dependencies out of the
+  portable framework. Keep private product code, vendor files, original assets,
+  and device dumps outside the repository.
 - Use `embedded-hal` and `embedded-graphics`; avoid duplicate abstractions when
   their existing contracts apply. Runtime crates must not depend on `std`.
 - Preserve synchronous completion, bounded I/O obligations, first-error
