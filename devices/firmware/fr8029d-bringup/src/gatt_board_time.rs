@@ -182,13 +182,28 @@ mod arm {
     const DISCONNECTS: usize = 45;
     const APP_FAULT: usize = 46;
     const CLOCK_FAULT: usize = 47;
+    const DIAGNOSTIC_VERSION: usize = 63;
     const FAULTED: u32 = 0x8000_0000;
+    const MAC_PROBE: bool = cfg!(all(
+        feature = "ble-gatt-mac-probe",
+        not(feature = "ble-gatt-xip")
+    ));
     const IDENTITY: (&str, &[u8; 14]) = if cfg!(feature = "ble-gatt-freertos") {
-        ("FR29-RTOS", b"\x02\x01\x06\x0a\x09FR29-RTOS")
+        let advertising_data = if MAC_PROBE {
+            b"\x02\x01\x06\x0a\xff\xff\xffMFR29R1"
+        } else {
+            b"\x02\x01\x06\x0a\x09FR29-RTOS"
+        };
+        ("FR29-RTOS", advertising_data)
     } else if cfg!(feature = "ble-gatt-xip") {
         ("FR29-XN01", b"\x02\x01\x06\x0a\x09FR29-XN01")
     } else {
-        ("FR29-GAT2", b"\x02\x01\x06\x0a\x09FR29-GAT2")
+        let advertising_data = if MAC_PROBE {
+            b"\x02\x01\x06\x0a\xff\xff\xffMFR29A1"
+        } else {
+            b"\x02\x01\x06\x0a\x09FR29-GAT2"
+        };
+        ("FR29-GAT2", advertising_data)
     };
 
     #[derive(Default)]
@@ -250,12 +265,21 @@ mod arm {
         for index in PHASE..=CLOCK_FAULT {
             diagnostic(index, 0);
         }
+        diagnostic(DIAGNOSTIC_VERSION, 1);
         diagnostic(PHASE, 1);
 
         if let Ok(address) = RandomAddress::new(GATT_ADDRESS) {
             let identity = GattIdentity {
                 address,
-                version: Version::new(0x08, 0xffff, 1),
+                version: Version::new(
+                    if crate::gatt_board_radio::ADAPTIVE_PHY {
+                        0x09
+                    } else {
+                        0x08
+                    },
+                    0xffff,
+                    1,
+                ),
                 name: IDENTITY.0,
                 advertising_data: IDENTITY.1,
             };

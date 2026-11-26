@@ -2,7 +2,7 @@
 #include "task.h"
 
 #ifdef FR29_EVENT_SRAM
-#define FR29_BLE_STACK_BYTES 14336U
+#define FR29_BLE_STACK_BYTES 13312U
 #else
 #define FR29_BLE_STACK_BYTES 16384U
 #endif

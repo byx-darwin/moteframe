@@ -82,14 +82,18 @@ fn test_should_encode_first_receive_time_across_coarse_wrap() -> Result<(), Conn
     };
     let event = request.first_event(time);
     // The first possible anchor is 24 - 94 + 704 + 2500 * (1 + 3)
-    // half-microseconds after the initial coarse boundary. Open 71
-    // half-microseconds earlier (64 guard plus 7 clock widening).
-    assert_eq!(event.start.coarse, 13);
-    assert_eq!(event.start.fine_countdown, 61);
-    assert_eq!(event.receive_window, 1293);
+    // half-microseconds after the initial coarse boundary.
+    let (start, fine, window, duration) = if MAC_PROBE_TIMING {
+        (10, 170, 2285, 5521)
+    } else {
+        (13, 61, 1293, 3537)
+    };
+    assert_eq!(event.start.coarse, u32::from(start));
+    assert_eq!(event.start.fine_countdown, fine);
+    assert_eq!(event.receive_window, window);
     assert_eq!(
         event.slot_words(0x01e4),
-        [0x2802, 13, 0, 61, 0x79, 3537, 0, 0x0f00]
+        [0x2802, start, 0, fine, 0x79, duration, 0, 0x0f00]
     );
     let control = request.control_words(1, 0x0d38, event);
     for (offset, word) in [
@@ -102,7 +106,7 @@ fn test_should_encode_first_receive_time_across_coarse_wrap() -> Result<(), Conn
         (0x14, 0x0012),
         (0x18, 0x8500),
         (0x1a, 7),
-        (0x1e, 1293),
+        (0x1e, window),
         (0x24, 0x034e),
         (0x2e, 45),
         (0x30, 45),
@@ -128,11 +132,16 @@ fn test_should_derive_data_anchor_without_adding_pdu_airtime() -> Result<(), Con
     assert_eq!(anchor.coarse, 0x0fff_ffff);
     assert_eq!(anchor.fine_countdown, 73);
     let next = request.event_after(anchor, 1);
-    // A 30 ms interval is 96 coarse ticks. At 520 ppm the one-sided
-    // allowance is 32 half-microseconds in addition to the 64-tick guard.
-    assert_eq!(next.start.coarse, 95);
-    assert_eq!(next.start.fine_countdown, 169);
-    assert_eq!(next.receive_window, 55);
+    // A 30 ms interval is 96 coarse ticks. At 520 ppm the clock widening
+    // adds 32 half-microseconds to the fixed guard.
+    let (start, fine, window) = if MAC_PROBE_TIMING {
+        (92, 278, 1047)
+    } else {
+        (95, 169, 55)
+    };
+    assert_eq!(next.start.coarse, start);
+    assert_eq!(next.start.fine_countdown, fine);
+    assert_eq!(next.receive_window, window);
     Ok(())
 }
 
@@ -157,15 +166,24 @@ fn test_should_decode_and_schedule_the_captured_50_millisecond_interval() -> Res
         coarse: 0x0005_308b,
         fine_countdown: 0x1ee,
     });
-    assert_eq!(event.receive_window, 1319);
+    let (start, fine, window, duration) = if MAC_PROBE_TIMING {
+        (0x3100, 116, 2311, 5573)
+    } else {
+        (0x3103, 7, 1319, 3589)
+    };
+    assert_eq!(event.receive_window, window);
     assert_eq!(
         event.slot_words(0x01e4),
-        [0x2802, 0x3103, 5, 7, 0x79, 3589, 0, 0x0f00]
+        [0x2802, start, 5, fine, 0x79, duration, 0, 0x0f00]
     );
     Ok(())
 }
 
 const UPDATE_IND: [u8; 12] = [0, 1, 4, 0, 6, 0, 0, 0, 0xf4, 1, 0x0b, 0];
+const MAC_PROBE_TIMING: bool = cfg!(all(
+    feature = "ble-gatt-mac-probe",
+    not(feature = "ble-gatt-xip")
+));
 
 #[test]
 fn test_should_schedule_the_phone_update_from_the_old_anchor() -> Result<(), ConnectError> {
@@ -180,16 +198,21 @@ fn test_should_schedule_the_phone_update_from_the_old_anchor() -> Result<(), Con
         fine_countdown: 600,
     };
     let event = update.event_at(anchor, 40, 6, 1);
-    assert_eq!(event.receive_window, 894);
+    let (start, fine, window, duration) = if MAC_PROBE_TIMING {
+        (969, 607, 1886, 4723)
+    } else {
+        (972, 498, 894, 2739)
+    };
+    assert_eq!(event.receive_window, window);
     assert_eq!(
         event.slot_words(0x01e4),
-        [0x2802, 972, 0, 498, 0x79, 2739, 0, 0x0f00]
+        [0x2802, start, 0, fine, 0x79, duration, 0, 0x0f00]
     );
     let next = event.one_interval_later(update.interval);
-    assert_eq!(next.receive_window, 894);
+    assert_eq!(next.receive_window, window);
     assert_eq!(
         next.slot_words(0x01e4),
-        [0x2802, 996, 0, 498, 0x79, 2739, 0, 0x0f00]
+        [0x2802, start + 24, 0, fine, 0x79, duration, 0, 0x0f00]
     );
     Ok(())
 }
@@ -227,4 +250,140 @@ fn test_should_reject_malformed_connection_updates() {
         update[index] = value;
         assert_eq!(ConnectionUpdate::decode(&update, 5), Err(error));
     }
+}
+
+#[test]
+fn asymmetric_phy_update_uses_peripheral_directions_at_the_wrapping_instant() {
+    use fr8029d_bringup::phy::LinkPhy;
+    let mut phy = LinkPhy::default();
+    assert!(phy.schedule(0xffff, 1, 1, 2));
+    assert_eq!(phy.apply(0), None);
+    assert_eq!(phy.apply(1), Some(1)); // peripheral TX=2M, RX=1M
+    assert!(phy.schedule(2, 3, 2, 0));
+    assert_eq!(phy.apply(3), Some(5));
+    assert!(!phy.schedule(4, 3, 1, 1));
+}
+
+#[test]
+fn isolated_losses_do_not_downgrade_and_sustained_losses_request_one_m() {
+    use fr8029d_bringup::phy::LinkPhy;
+    let mut phy = LinkPhy::default();
+    phy.peer_features(true);
+    assert!(phy.schedule(0, 6, 2, 2));
+    assert_eq!(phy.apply(6), Some(5));
+    for _ in 0..100 {
+        phy.observe_event(true);
+        phy.observe_event(false);
+        assert_eq!(phy.take_request(), None);
+    }
+    for _ in 0..8 {
+        phy.observe_event(true);
+    }
+    assert_eq!(phy.take_request(), Some(1));
+    assert_eq!(phy.take_request(), None);
+}
+
+#[test]
+fn one_m_peers_stay_at_one_m_and_no_change_holds_off_retries() {
+    use fr8029d_bringup::phy::LinkPhy;
+    let mut phy = LinkPhy::default();
+    for _ in 0..200 {
+        phy.observe_event(false);
+    }
+    assert_eq!(phy.take_request(), None);
+    phy.peer_features(true);
+    assert_eq!(phy.take_request(), Some(2));
+    assert!(phy.schedule(10, 0, 0, 0));
+    for _ in 0..127 {
+        phy.observe_event(false);
+    }
+    assert_eq!(phy.take_request(), None);
+    phy.observe_event(false);
+    assert_eq!(phy.take_request(), Some(2));
+}
+
+#[test]
+fn downgrade_and_recovery_wait_for_the_centrals_instant() {
+    use fr8029d_bringup::phy::LinkPhy;
+    let mut phy = LinkPhy::default();
+    phy.peer_features(true);
+    assert!(phy.schedule(1, 7, 2, 2));
+    assert_eq!(phy.apply(7), Some(5));
+    for _ in 0..8 {
+        phy.observe_event(true);
+    }
+    assert_eq!(phy.take_request(), Some(1));
+    assert!(phy.schedule(16, 22, 1, 1));
+    assert!(phy.rx_two_m());
+    assert_eq!(phy.apply(22), Some(0));
+    assert!(!phy.rx_two_m());
+    for _ in 0..127 {
+        phy.observe_event(false);
+    }
+    assert_eq!(phy.take_request(), None);
+    phy.observe_event(false);
+    assert_eq!(phy.take_request(), Some(2));
+    assert!(phy.schedule(151, 157, 2, 2));
+    assert_eq!(phy.apply(157), Some(5));
+}
+
+#[test]
+fn quiet_central_is_queried_once_and_unsupported_directions_are_preserved() {
+    use fr8029d_bringup::phy::LinkPhy;
+    let mut phy = LinkPhy::default();
+    for _ in 0..16 {
+        phy.observe_event(false);
+    }
+    assert!(phy.take_feature_query());
+    assert!(!phy.take_feature_query());
+    phy.peer_features(true);
+    assert_eq!(phy.take_request(), Some(2));
+    assert!(phy.schedule(18, 24, 4, 2));
+    assert_eq!(phy.apply(24), Some(1));
+    assert!(!phy.rx_two_m());
+}
+
+#[cfg(feature = "ble-gatt-dle")]
+#[test]
+fn extended_event_allots_airtime_for_both_directions_without_moving_the_anchor()
+-> Result<(), ConnectError> {
+    use fr8029d_bringup::connection::DataAirtime;
+    let request = ConnectionRequest::decode(0x2285, &REQUEST, ADV_ADDRESS)?;
+    let event = request.event_after(
+        PacketTime {
+            coarse: 5,
+            fine_countdown: 40,
+        },
+        1,
+    );
+    let budget = |bytes, time, two_m| DataAirtime::new(bytes, time, two_m);
+    let legacy = budget(27, 328, false);
+    let full = budget(251, 2120, false);
+    let fast = budget(251, 2120, true);
+    let asymmetric = budget(251, 328, true);
+    assert_eq!(
+        (
+            legacy.octets(),
+            full.octets(),
+            fast.octets(),
+            asymmetric.octets()
+        ),
+        (27, 251, 251, 71)
+    );
+    let duration = |rx, tx| event.with_data_airtime(rx, tx).slot_words(0x1e4)[5];
+    assert_eq!(duration(legacy, legacy), event.slot_words(0x1e4)[5]);
+    assert_eq!(
+        duration(full, full) - duration(legacy, legacy),
+        2 * (2120 - 328)
+    );
+    assert_eq!(
+        duration(full, fast) - duration(legacy, legacy),
+        2120 + 1064 - 2 * 328
+    );
+    assert_eq!(event.with_data_airtime(full, fast).start, event.start);
+    assert_eq!(
+        event.with_data_airtime(full, fast).receive_window,
+        event.receive_window
+    );
+    Ok(())
 }

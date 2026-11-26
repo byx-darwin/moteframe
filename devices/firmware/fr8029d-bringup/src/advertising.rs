@@ -24,6 +24,17 @@ pub const RX_COUNT: usize = 6;
 pub const RX_WORDS: usize = 18;
 const RX_PAYLOAD_BASE: u16 = 0x1de9;
 const RX_PAYLOAD_STRIDE: u16 = 260;
+// Byte offsets in Packet RAM. Both TX descriptors use the same payload only
+// while a single controller token owns it. RX buffers remain disjoint at 251.
+#[cfg(feature = "ble-gatt-dle")]
+const _: () = {
+    assert!(RX_OFFSET as usize + RX_COUNT * RX_WORDS * 2 <= TX_OFFSET as usize);
+    assert!(SCAN_TX_OFFSET + 16 <= TX_PAYLOAD_OFFSET);
+    assert!(TX_PAYLOAD_OFFSET + 251 <= SCAN_PAYLOAD_OFFSET);
+    assert!(SCAN_PAYLOAD_OFFSET < RX_PAYLOAD_BASE);
+    assert!(RX_PAYLOAD_STRIDE >= 251 + 4);
+    assert!(RX_PAYLOAD_BASE as usize + (RX_COUNT - 1) * RX_PAYLOAD_STRIDE as usize + 255 <= 0x4000);
+};
 /// Separate lab address to avoid scanner caches from earlier probes.
 pub const CONNECTABLE_ADDRESS: [u8; 6] = [0x9e, 0x80, 0x29, 0x01, 0x25, 0xc3];
 /// Advertising flags and name for the connectable receive probe.
@@ -83,15 +94,22 @@ pub const fn connectable_descriptors() -> [[u16; 8]; 2] {
     ]
 }
 
+/// Builds one descriptor in the fixed six-slot ring, with a private payload buffer.
+#[must_use]
+pub const fn receive_descriptor(index: u16) -> [u16; RX_WORDS] {
+    debug_assert!(index < 6);
+    let mut record = [0; RX_WORDS];
+    record[0] = (RX_OFFSET + 36 * ((index + 1) % 6)) / 4;
+    record[10] = RX_PAYLOAD_BASE + RX_PAYLOAD_STRIDE * index;
+    record
+}
+
 /// Builds a ring of receive descriptors with six disjoint byte buffers.
 #[must_use]
 pub fn receive_ring() -> [[u16; RX_WORDS]; RX_COUNT] {
-    const STRIDE_BYTES: u16 = 36;
     let mut ring = [[0; RX_WORDS]; RX_COUNT];
     for (index, record) in (0_u16..).zip(&mut ring) {
-        let next = (index + 1) % 6;
-        record[0] = (RX_OFFSET + STRIDE_BYTES * next) / 4;
-        record[10] = RX_PAYLOAD_BASE + RX_PAYLOAD_STRIDE * index;
+        *record = receive_descriptor(index);
     }
     ring
 }

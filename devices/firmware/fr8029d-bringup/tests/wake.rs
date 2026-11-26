@@ -37,7 +37,7 @@ fn unfinished_radio_event_keeps_its_watchdog_deadline() {
 
 #[test]
 fn a_long_slot_stays_valid_past_50_ms_across_clock_wrap() {
-    let slot = SlotWatchdog::new(CLOCK_MASK - 2, 0x8000 | 183);
+    let slot = SlotWatchdog::new(CLOCK_MASK - 2, 0x8000 | 0xb7);
     assert!(!slot.expired(CLOCK_MASK - 3));
     assert!(!slot.expired(157));
     assert_eq!(

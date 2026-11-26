@@ -19,6 +19,7 @@ dependencies = [
  "embassy-sync",
  "embassy-time",
  "portable-atomic",
+ "static_cell",
  "trouble-host",
 ]
 

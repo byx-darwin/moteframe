@@ -6,10 +6,7 @@ use super::{
     IRQ_ACK, IRQ_EVENT_END, IRQ_STATUS, PACKET_RAM, SUBMIT, diagnostic, exchange_slot, read32,
     status_slot, write_record, write32,
 };
-use core::{
-    ptr::write_volatile,
-    sync::atomic::{Ordering, fence},
-};
+use core::sync::atomic::{Ordering, fence};
 #[cfg(not(feature = "ble-gatt-board"))]
 use fr8029d_bringup::connection::PacketTime;
 use fr8029d_bringup::{
@@ -23,6 +20,7 @@ pub(super) const LINK_ID: u8 = 1;
 const MAX_PROBE_EVENTS: u16 = 20;
 pub(super) const TX_DONE: u16 = 1 << 15;
 pub(super) const CONNECTED_RX_ERRORS: u16 = 0x007f;
+pub(super) const EVENT_COMPLETION_TIMEOUT: u32 = 18;
 
 pub(super) fn prepare_link(request: ConnectionRequest, event: ConnectionEvent) {
     // Advertising has completed. Empty, returned TX descriptors allow the
@@ -41,12 +39,9 @@ pub(super) fn prepare_link(request: ConnectionRequest, event: ConnectionEvent) {
 
 pub(super) fn submit_link(slot: u32, event: ConnectionEvent, counter: u16) -> u16 {
     let control = PACKET_RAM + usize::from(CONNECTION_CONTROL);
-    // SAFETY: There is no in-flight event when these window and counter
-    // fields are overwritten. The hardware owns the remaining link state.
-    unsafe {
-        write_volatile((control + 0x1e) as *mut u16, event.receive_window);
-        write_volatile((control + 0x60) as *mut u16, counter);
-    }
+    // The previous event has completed. Preserve the rest of the live link record.
+    write_record(control + 0x1e, &[event.receive_window]);
+    write_record(control + 0x60, &[counter]);
     let words = event.slot_words(CONNECTION_CONTROL);
     submit(slot, &words);
     words[5]
@@ -138,5 +133,5 @@ pub(super) fn wait_connection_event(slot: u32) -> Result<u32, u32> {
             return Ok(status);
         }
     }
-    Err(18)
+    Err(EVENT_COMPLETION_TIMEOUT)
 }

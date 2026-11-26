@@ -1,9 +1,18 @@
 //! Bounded portable link state and acknowledgement accounting.
 use crate::{
-    Advertisement, ConnectionParameters, FrameKind, LinkBackend, LinkEvent, LinkFrame, OwnedQueue,
-    Peer, TxAdmission,
+    Advertisement, ConnectionParameters, FrameKind, LinkBackend, LinkEvent, LinkFrame, Peer,
+    TxAdmission,
 };
 
+#[cfg(not(feature = "data-length"))]
+use crate::OwnedQueue;
+#[cfg(feature = "data-length")]
+use crate::dle_queues::{EventQueue, TxFragment, TxQueue};
+#[cfg(feature = "data-length")]
+use crate::{
+    DataLength,
+    data_length::{LengthState, Procedure},
+};
 /// Bluetooth version identity supplied by the integrator, never a product service.
 #[derive(Clone, Copy, Debug)]
 pub struct Version {
@@ -22,6 +31,11 @@ impl Version {
         }
     }
 }
+#[cfg(feature = "data-length")]
+type EventFrame = ();
+#[cfg(not(feature = "data-length"))]
+type EventFrame = LinkFrame;
+
 /// A connection handle plus local generation, preventing stale queued work.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ConnectionId {
@@ -37,7 +51,7 @@ impl ConnectionId {
 }
 /// Host-facing observations, before HCI encoding.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ControllerEvent {
+pub enum ControllerEvent<F = LinkFrame> {
     /// One peripheral connection became active.
     Connected {
         /// Connection identity.
@@ -52,7 +66,7 @@ pub enum ControllerEvent {
         /// Connection identity.
         id: ConnectionId,
         /// Complete owned link frame.
-        frame: LinkFrame,
+        frame: F,
     },
     /// Number of host ACL packets acknowledged, never FIFO admissions.
     Completed {
@@ -67,6 +81,23 @@ pub enum ControllerEvent {
         id: ConnectionId,
         /// HCI reason.
         reason: u8,
+    },
+    /// Negotiation changed effective data octets or times.
+    #[cfg(feature = "data-length")]
+    DataLengthChanged {
+        /// Active connection identity.
+        id: ConnectionId,
+        /// Effective limits in peripheral order.
+        limits: DataLength,
+    },
+    /// The PHY changed at the scheduled connection event.
+    PhyUpdated {
+        /// Active connection identity.
+        id: ConnectionId,
+        /// Peripheral transmit PHY, in HCI encoding.
+        tx: u8,
+        /// Peripheral receive PHY, in HCI encoding.
+        rx: u8,
     },
     /// Hardware applied new parameters at the scheduled instant.
     ParametersUpdated {
@@ -91,6 +122,7 @@ pub enum ControllerError<E> {
     Protocol,
 }
 #[derive(Clone, Copy, Debug)]
+#[cfg(not(feature = "data-length"))]
 struct Pending {
     frame: LinkFrame,
     host: bool,
@@ -99,7 +131,8 @@ struct Pending {
 #[derive(Clone, Copy, Debug)]
 struct Inflight {
     token: u32,
-    pending: Pending,
+    host: bool,
+    terminate: bool,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum RunState {
@@ -118,11 +151,21 @@ pub struct Controller<B: LinkBackend> {
     generation: u32,
     next_handle: u16,
     token: u32,
+    #[cfg(not(feature = "data-length"))]
     tx: OwnedQueue<Pending, 8>,
+    #[cfg(feature = "data-length")]
+    tx: TxQueue,
+    #[cfg(not(feature = "data-length"))]
     events: OwnedQueue<ControllerEvent, 16>,
+    #[cfg(feature = "data-length")]
+    events: EventQueue,
     inflight: Option<Inflight>,
     pending_acl: u8,
     version_sent: bool,
+    #[cfg(feature = "data-length")]
+    lengths: LengthState,
+    #[cfg(feature = "data-length")]
+    pub(crate) suggested_length: Option<DataLength>,
 }
 impl<B: LinkBackend> Controller<B> {
     /// Owns the backend; call reset before the first operation.
@@ -136,11 +179,21 @@ impl<B: LinkBackend> Controller<B> {
             generation: 0,
             next_handle: 1,
             token: 0,
+            #[cfg(not(feature = "data-length"))]
             tx: OwnedQueue::new(),
+            #[cfg(feature = "data-length")]
+            tx: TxQueue::new(),
+            #[cfg(not(feature = "data-length"))]
             events: OwnedQueue::new(),
+            #[cfg(feature = "data-length")]
+            events: EventQueue::new(),
             inflight: None,
             pending_acl: 0,
             version_sent: false,
+            #[cfg(feature = "data-length")]
+            lengths: LengthState::new(DataLength::MAX),
+            #[cfg(feature = "data-length")]
+            suggested_length: None,
         }
     }
     pub(crate) const fn initialized(&self) -> bool {
@@ -158,6 +211,24 @@ impl<B: LinkBackend> Controller<B> {
     pub(crate) const fn has_acl_room(&self) -> bool {
         self.pending_acl < 4 && !self.tx.is_full()
     }
+    pub(crate) fn le_features(&self) -> [u8; 8] {
+        let capable = u8::from(self.backend.supports_two_m());
+        let dle = self.supports_data_length();
+        [
+            (capable | u8::from(dle)) << 3 | (u8::from(dle) << 5),
+            capable,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+        ]
+    }
+    pub(crate) fn supports_data_length(&self) -> bool {
+        cfg!(feature = "data-length") && self.backend.supports_data_length()
+    }
+
     /// Backend access for board scheduling; do not mutate active hardware outside this Controller.
     pub fn backend_mut(&mut self) -> &mut B {
         &mut self.backend
@@ -191,6 +262,10 @@ impl<B: LinkBackend> Controller<B> {
             .generation
             .checked_add(1)
             .ok_or(ControllerError::Capacity)?;
+        #[cfg(feature = "data-length")]
+        {
+            self.suggested_length = None;
+        }
         self.clear_link();
         self.events.clear();
 
@@ -204,6 +279,10 @@ impl<B: LinkBackend> Controller<B> {
         self.inflight = None;
         self.pending_acl = 0;
         self.version_sent = false;
+        #[cfg(feature = "data-length")]
+        {
+            self.lengths = LengthState::new(self.suggested_length.unwrap_or(DataLength::MAX));
+        }
     }
     pub(crate) fn check(&self) -> Result<(), ControllerError<B::Error>> {
         if self.state == RunState::Faulted {
@@ -259,9 +338,17 @@ impl<B: LinkBackend> Controller<B> {
         if self.connection != Some(id) || frame.kind() == FrameKind::Control {
             return Err(ControllerError::State);
         }
+        if frame.payload().len() > 27 && !self.supports_data_length() {
+            return Err(ControllerError::Protocol);
+        }
         if self.pending_acl >= 4 {
             return Err(ControllerError::Capacity);
         }
+        #[cfg(feature = "data-length")]
+        self.tx
+            .push_host(frame)
+            .map_err(|_| ControllerError::Capacity)?;
+        #[cfg(not(feature = "data-length"))]
         self.tx
             .push(Pending {
                 frame,
@@ -286,22 +373,103 @@ impl<B: LinkBackend> Controller<B> {
         }
         self.control(&[2, reason], true)
     }
-    fn emit(&mut self, event: ControllerEvent) -> Result<(), ControllerError<B::Error>> {
+    fn emit(
+        &mut self,
+        event: ControllerEvent<EventFrame>,
+    ) -> Result<(), ControllerError<B::Error>> {
         self.events
             .push(event)
             .map_err(|_| ControllerError::Capacity)
     }
     fn control(&mut self, bytes: &[u8], terminate: bool) -> Result<(), ControllerError<B::Error>> {
-        let frame =
-            LinkFrame::new(FrameKind::Control, bytes).map_err(|_| ControllerError::Protocol)?;
-        self.tx
-            .push(Pending {
-                frame,
-                host: false,
-                terminate,
-            })
-            .map_err(|_| ControllerError::Capacity)
+        #[cfg(feature = "data-length")]
+        {
+            self.tx
+                .push_control(bytes, terminate)
+                .map_err(|_| ControllerError::Capacity)
+        }
+        #[cfg(not(feature = "data-length"))]
+        {
+            let frame =
+                LinkFrame::new(FrameKind::Control, bytes).map_err(|_| ControllerError::Protocol)?;
+            self.tx
+                .push(Pending {
+                    frame,
+                    host: false,
+                    terminate,
+                })
+                .map_err(|_| ControllerError::Capacity)
+        }
     }
+    fn send_features(
+        &mut self,
+        opcode: u8,
+        peer_first_octet: u8,
+    ) -> Result<(), ControllerError<B::Error>> {
+        let mut pdu = [0; 9];
+        pdu[0] = opcode;
+        pdu[1..].copy_from_slice(&self.le_features());
+        pdu[1] &= peer_first_octet;
+        self.control(&pdu, false)
+    }
+
+    #[cfg(feature = "data-length")]
+    fn apply_length(&mut self) -> Result<(), ControllerError<B::Error>> {
+        let limits = self.lengths.local.effective(self.lengths.peer);
+        if limits != self.lengths.effective {
+            self.lengths.effective = limits;
+            self.backend.data_length_updated(limits);
+            let id = self.connection.ok_or(ControllerError::State)?;
+            self.emit(ControllerEvent::DataLengthChanged { id, limits })?;
+        }
+        Ok(())
+    }
+
+    #[cfg(feature = "data-length")]
+    pub(crate) fn set_tx_length(
+        &mut self,
+        octets: u16,
+        time: u16,
+    ) -> Result<(), ControllerError<B::Error>> {
+        if matches!(
+            self.lengths.procedure,
+            Procedure::Waiting | Procedure::Unsupported
+        ) {
+            return Err(ControllerError::State);
+        }
+        self.lengths.local.tx_octets = octets;
+        self.lengths.local.tx_time = time.min(DataLength::MAX.tx_time);
+        self.lengths.procedure = Procedure::Wanted;
+        Ok(())
+    }
+
+    #[cfg(feature = "data-length")]
+    fn receive_length(
+        &mut self,
+        opcode: u8,
+        bytes: &[u8],
+    ) -> Result<(), ControllerError<B::Error>> {
+        if opcode == 0x15 && self.lengths.procedure != Procedure::Waiting {
+            return Ok(());
+        }
+        let Some(peer) = DataLength::from_peer(bytes) else {
+            if opcode == 0x14 {
+                return self.control(&[0x11, opcode, 0x1e], false);
+            }
+            self.lengths.procedure = Procedure::Idle;
+            return Ok(());
+        };
+        if opcode == 0x14 {
+            self.control(&self.lengths.local.control(0x15), false)?;
+        }
+        // A simultaneous remote request does not complete our outstanding request.
+        if opcode == 0x15 || self.lengths.procedure != Procedure::Waiting {
+            self.lengths.procedure = Procedure::Idle;
+        }
+        self.lengths.peer = peer;
+        self.apply_length()
+    }
+
     fn receive_control(&mut self, payload: &[u8]) -> Result<(), ControllerError<B::Error>> {
         match payload {
             [0x00, ..] if payload.len() == 12 => self
@@ -313,8 +481,69 @@ impl<B: LinkBackend> Controller<B> {
                 .channel_map(payload)
                 .map_err(ControllerError::Backend),
             [0x02, reason] => self.end(*reason),
-            [0x08 | 0x0e, _, _, _, _, _, _, _, _] => {
-                self.control(&[9, 0, 0, 0, 0, 0, 0, 0, 0], false)
+            [
+                opcode @ (0x08 | 0x09 | 0x0e),
+                first,
+                features,
+                _,
+                _,
+                _,
+                _,
+                _,
+                _,
+            ] => {
+                #[cfg(feature = "data-length")]
+                if first & 0x20 == 0 && self.supports_data_length() {
+                    self.lengths.procedure = Procedure::Unsupported;
+                }
+                self.backend.peer_two_m(features & 1 != 0);
+                if *opcode == 0x09 {
+                    Ok(())
+                } else {
+                    self.send_features(0x09, *first)
+                }
+            }
+            #[cfg(feature = "data-length")]
+            [opcode @ (0x14 | 0x15), bytes @ ..] if self.supports_data_length() => {
+                self.receive_length(*opcode, bytes)
+            }
+            #[cfg(feature = "data-length")]
+            [0x07, 0x14] | [0x11, 0x14, _] | [0x0d, _]
+                if self.lengths.procedure == Procedure::Waiting =>
+            {
+                self.lengths.procedure = if matches!(payload, [0x07, _] | [0x11, _, 0x1a]) {
+                    Procedure::Unsupported
+                } else {
+                    Procedure::Idle
+                };
+                Ok(())
+            }
+            [0x07, 0x16] if self.backend.supports_two_m() => {
+                self.backend.phy_rejected();
+                self.backend.peer_two_m(false);
+                Ok(())
+            }
+            [0x16, tx, rx] if self.backend.supports_two_m() => {
+                if tx.trailing_zeros() >= 3 || rx.trailing_zeros() >= 3 {
+                    return self.control(&[0x11, 0x16, 0x1e], false);
+                }
+                let mask = self.backend.phy_response_mask();
+                self.control(&[0x17, mask, mask], false)
+            }
+            [0x18, central_tx, peripheral_tx, lo, hi] if self.backend.supports_two_m() => {
+                if self.backend.schedule_phy(
+                    u16::from_le_bytes([*lo, *hi]),
+                    *central_tx,
+                    *peripheral_tx,
+                ) {
+                    Ok(())
+                } else {
+                    self.end(0x28)
+                }
+            }
+            [0x11, 0x16, _] | [0x0d, _] if self.backend.supports_two_m() => {
+                self.backend.phy_rejected();
+                Ok(())
             }
             [0x0c, _, _, _, _, _] if !self.version_sent => {
                 let company = self.version.company.to_le_bytes();
@@ -333,7 +562,7 @@ impl<B: LinkBackend> Controller<B> {
                 self.version_sent = true;
                 Ok(())
             }
-            [0x0c, _, _, _, _, _] | [0x07, _] | [0x09, _, _, _, _, _, _, _, _] => Ok(()),
+            [0x0c, _, _, _, _, _] | [0x07, _] => Ok(()),
             [0x00..=0x02 | 0x07..=0x09 | 0x0c | 0x0e, ..] | [] => Err(ControllerError::Protocol),
             [opcode, ..] => self.control(&[7, *opcode], false),
         }
@@ -346,8 +575,8 @@ impl<B: LinkBackend> Controller<B> {
         }
         Ok(())
     }
-    fn observe(&mut self, event: LinkEvent) -> Result<(), ControllerError<B::Error>> {
-        match event {
+    fn observe(&mut self, event: &LinkEvent) -> Result<(), ControllerError<B::Error>> {
+        match *event {
             LinkEvent::Connected(peer, parameters) => {
                 if !self.is_advertising() || self.connection.is_some() {
                     return Err(ControllerError::Protocol);
@@ -365,6 +594,12 @@ impl<B: LinkBackend> Controller<B> {
                 } else {
                     self.next_handle + 1
                 };
+                #[cfg(feature = "data-length")]
+                if self.supports_data_length() {
+                    self.lengths =
+                        LengthState::new(self.suggested_length.unwrap_or(DataLength::MAX));
+                    self.backend.data_length_updated(DataLength::LEGACY);
+                }
                 self.connection = Some(id);
                 self.state = RunState::Ready;
                 self.emit(ControllerEvent::Connected {
@@ -376,10 +611,10 @@ impl<B: LinkBackend> Controller<B> {
             LinkEvent::Acknowledged(token) => {
                 if let Some(inflight) = self.inflight.filter(|i| i.token == token) {
                     self.inflight = None;
-                    if inflight.pending.terminate {
+                    if inflight.terminate {
                         return self.end(0x16);
                     }
-                    if inflight.pending.host {
+                    if inflight.host {
                         let id = self.connection.ok_or(ControllerError::Protocol)?;
                         self.pending_acl = self
                             .pending_acl
@@ -390,17 +625,32 @@ impl<B: LinkBackend> Controller<B> {
                 }
                 Ok(())
             }
-            LinkEvent::Received(frame) => {
+            LinkEvent::Received(ref frame) => {
                 if let Some(id) = self.connection {
                     if frame.kind() == FrameKind::Control {
                         self.receive_control(frame.payload())?;
                     } else if !frame.payload().is_empty() {
-                        self.emit(ControllerEvent::Acl { id, frame })?;
+                        #[cfg(feature = "data-length")]
+                        if frame.payload().len() > usize::from(self.lengths.effective.rx_octets) {
+                            return Err(ControllerError::Protocol);
+                        }
+                        #[cfg(feature = "data-length")]
+                        self.events
+                            .push_acl(id, *frame)
+                            .map_err(|_| ControllerError::Capacity)?;
+                        #[cfg(not(feature = "data-length"))]
+                        self.emit(ControllerEvent::Acl { id, frame: *frame })?;
                     }
                 }
                 Ok(())
             }
             LinkEvent::Disconnected(reason) => self.end(reason),
+            LinkEvent::PhyUpdated(tx, rx) => {
+                if let Some(id) = self.connection {
+                    self.emit(ControllerEvent::PhyUpdated { id, tx, rx })?;
+                }
+                Ok(())
+            }
             LinkEvent::ParametersUpdated(parameters) => {
                 if let Some(id) = self.connection {
                     self.emit(ControllerEvent::ParametersUpdated { id, parameters })?;
@@ -409,32 +659,133 @@ impl<B: LinkBackend> Controller<B> {
             }
         }
     }
+    fn queue_local_control(&mut self) -> Result<(), ControllerError<B::Error>> {
+        #[cfg(feature = "data-length")]
+        if self.supports_data_length() && self.lengths.procedure == Procedure::Waiting {
+            return Ok(());
+        }
+        if self.backend.take_feature_query() {
+            return self.send_features(0x0e, 0xff);
+        }
+        #[cfg(feature = "data-length")]
+        if self.supports_data_length() && self.lengths.procedure == Procedure::Wanted {
+            return Ok(());
+        }
+        if let Some(mask) = self.backend.take_phy_request() {
+            self.control(&[0x16, mask, mask], false)?;
+        }
+        Ok(())
+    }
+    #[cfg(feature = "data-length")]
+    fn transmit_next(&mut self, fragment_limit: u8) -> Result<(), ControllerError<B::Error>> {
+        let local_request = self.supports_data_length()
+            && self.lengths.procedure == Procedure::Wanted
+            && self.tx.is_empty();
+        let request;
+        let fragment = if local_request {
+            request = self.lengths.local.control(0x14);
+            TxFragment::control(&request, false, false)
+        } else if let Some(fragment) = self.tx.next(fragment_limit) {
+            fragment
+        } else {
+            return Ok(());
+        };
+        let token = self.token.checked_add(1).ok_or(ControllerError::Capacity)?;
+        if self
+            .backend
+            .transmit_payload(token, fragment.kind, fragment.more, fragment.payload)
+            .map_err(ControllerError::Backend)?
+            == TxAdmission::Committed
+        {
+            self.token = token;
+            self.inflight = Some(Inflight {
+                token,
+                host: fragment.completes_host,
+                terminate: fragment.terminate,
+            });
+            if local_request {
+                self.lengths.procedure = Procedure::Waiting;
+            } else {
+                let consumed =
+                    u8::try_from(fragment.payload.len()).map_err(|_| ControllerError::Protocol)?;
+                self.tx.committed(fragment.completes_host, consumed);
+            }
+        }
+        Ok(())
+    }
     fn advance(&mut self) -> Result<(), ControllerError<B::Error>> {
         // Keep room for an observation; TX saturation faults rather than hiding ACKs.
+        #[cfg(feature = "data-length")]
+        let mut event = LinkEvent::Disconnected(0);
         for _ in 0..8 {
             if self.events.is_full() {
+                #[cfg(feature = "data-length")]
+                self.backend
+                    .service_backpressure()
+                    .map_err(ControllerError::Backend)?;
                 break;
             }
+            #[cfg(feature = "data-length")]
+            if !self
+                .backend
+                .poll_into(&mut event)
+                .map_err(ControllerError::Backend)?
+            {
+                break;
+            }
+            #[cfg(not(feature = "data-length"))]
             let Some(event) = self.backend.poll().map_err(ControllerError::Backend)? else {
                 break;
             };
-            self.observe(event)?;
+            self.observe(&event)?;
         }
-        if self.connection.is_some()
-            && self.inflight.is_none()
-            && let Some(pending) = self.tx.front().copied()
+        if self.connection.is_some() && !self.tx.is_full() {
+            self.queue_local_control()?;
+        }
+        if self.connection.is_none() || self.inflight.is_some() {
+            return Ok(());
+        }
+        let fragment_limit = self.backend.max_acl_fragment_len();
+        #[cfg(feature = "data-length")]
+        let fragment_limit =
+            fragment_limit.min(u8::try_from(self.lengths.effective.tx_octets).unwrap_or(27));
+        #[cfg(feature = "data-length")]
+        self.transmit_next(fragment_limit)?;
+        #[cfg(not(feature = "data-length"))]
         {
-            let token = self.token.checked_add(1).ok_or(ControllerError::Capacity)?;
-            let frame = pending.frame.with_more_data(self.tx.len() > 1);
-            if self
-                .backend
-                .transmit(token, frame)
-                .map_err(ControllerError::Backend)?
-                == TxAdmission::Committed
-            {
-                self.token = token;
-                self.tx.pop();
-                self.inflight = Some(Inflight { token, pending });
+            let has_queued_data = self.tx.len() > 1;
+            if let Some(queued) = self.tx.front_mut() {
+                let mut pending = *queued;
+                let remainder = if queued.host {
+                    pending.frame.split_off_acl(fragment_limit)
+                } else {
+                    None
+                };
+                pending.host &= remainder.is_none();
+                let token = self.token.checked_add(1).ok_or(ControllerError::Capacity)?;
+                let frame = pending
+                    .frame
+                    .with_more_data(has_queued_data || remainder.is_some());
+                if self
+                    .backend
+                    .transmit(token, frame)
+                    .map_err(ControllerError::Backend)?
+                    == TxAdmission::Committed
+                {
+                    self.token = token;
+                    // Retain the original Host credit on the last fragment. A
+                    // Busy result leaves the original packet intact for retry.
+                    if let Some(remainder) = remainder {
+                        queued.frame = remainder;
+                    } else {
+                        self.tx.pop();
+                    }
+                    self.inflight = Some(Inflight {
+                        token,
+                        host: pending.host,
+                        terminate: pending.terminate,
+                    });
+                }
             }
         }
         Ok(())

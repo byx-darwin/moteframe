@@ -133,7 +133,7 @@ fn configure_modem(trim: &RadioTrim) {
         (0xe0, 0x50),
         (0x192, 0x11),
         (0x193, 0x01),
-        (0x194, 0x01),
+        (0x2f4, 0x69),
         (0x19f, 0x11),
         (0x277, 0x00),
         (0x278, 0x00),
@@ -152,11 +152,16 @@ fn configure_modem(trim: &RadioTrim) {
         (0xd0, 0x0600_1515),
         (0xd8, 0x110b_2f02),
         (0xdc, 0xc350_c342),
-        (0x100, 0xcacd_d000),
-        (0x104, 0xa651_0012),
-        (0x10c, 0x0000_2ff0),
-        (0x110, 0x0035_3333),
+        // Analog/modem profile selected by factory trim version 2.
+        (0x100, 0xbacd_cf40),
+        (0x104, 0xa651_0011),
+        (0x108, 0xdeff_ffb7),
+        (0x10c, 0x0000_0ddd),
+        (0x110, 0x3939_3737),
         (0x178, 0x5a5a_5a3c),
+        (0x194, 0x2554_8e01),
+        (0x198, 0x0002_10a8),
+        (0x2f0, 0x6903_0708),
     ] {
         write32(MODEM + offset, value);
     }
@@ -167,23 +172,13 @@ fn configure_modem(trim: &RadioTrim) {
 
     // Set the gains and load the per-unit RX and TX tables before enabling events.
     update8(CALIBRATION_BANK, 0x10, 0x10);
-    let kvco = (trim.kvco << 4) | (trim.kvco >> 1);
-    update8(MODEM + 0x19c, 0x77, kvco);
+    update8(MODEM + 0x19c, 0x77, trim.tx_kvco_fields());
 
-    let measured_scale = u32::from(trim.tx_modulation_scale);
-    // The 1M modulation bank uses a Q14 conversion of the measured scale.
-    // 0x453b is the conversion verified for the v2 trim layout on this silicon.
-    let scale_1m = (measured_scale * 0x453b) >> 14;
-    for index in 0..8 {
-        let (current, scale_1m, scale_ref) = if index == 0 {
-            (trim.tx_modulation_current, scale_1m, measured_scale)
-        } else {
-            (0, 0, 0)
-        };
-        write8(MODEM + 0x1a0 + index, current);
-        write8(MODEM + 0x1a8 + index, current);
+    for (index, (scale_1m, scale_2m)) in trim.tx_modulation_bands().enumerate() {
+        write8(MODEM + 0x1a0 + index, trim.tx_modulation_current);
+        write8(MODEM + 0x1a8 + index, trim.tx_modulation_current);
         let offset = index * 2;
-        for (bank, scale) in [(0x1b0, scale_1m), (0x1c0, scale_ref)] {
+        for (bank, scale) in [(0x1b0, scale_1m), (0x1c0, scale_2m)] {
             let bytes = scale.to_le_bytes();
             write8(MODEM + bank + offset, bytes[0]);
             write8(MODEM + bank + offset + 1, bytes[1]);

@@ -11,7 +11,7 @@ use bt_hci::{
     controller::{Controller as Hci, ControllerCmdAsync, ControllerCmdSync},
     data::{AclBroadcastFlag, AclPacket, AclPacketBoundary, IsoPacket, SyncPacket},
 };
-#[cfg(feature = "external-wake")]
+#[cfg(any(feature = "external-wake", feature = "data-length"))]
 use core::future::Future;
 use core::{
     cell::{Cell, RefCell},
@@ -224,7 +224,7 @@ impl<B: LinkBackend> HciController<B> {
     }
 
     /// Borrows the transport for a Host that takes ownership of its HCI endpoint.
-    #[cfg(feature = "external-wake")]
+    #[cfg(any(feature = "external-wake", feature = "data-length"))]
     #[must_use]
     pub const fn borrowed(&self) -> HciControllerRef<'_, B> {
         HciControllerRef(self)
@@ -313,7 +313,6 @@ impl<B: LinkBackend> Hci for HciController<B> {
             AclPacketBoundary::Continuing => FrameKind::Continuation,
             _ => return Err(HciError::InvalidPacket),
         };
-        let frame = LinkFrame::new(kind, p.data()).map_err(|_| HciError::InvalidPacket)?;
         let id = self
             .state
             .try_borrow()
@@ -340,6 +339,9 @@ impl<B: LinkBackend> Hci for HciController<B> {
             let result = {
                 let Ok(mut s) = self.state.try_borrow_mut() else {
                     return Poll::Ready(Err(HciError::Busy));
+                };
+                let Ok(frame) = LinkFrame::new(kind, p.data()) else {
+                    return Poll::Ready(Err(HciError::InvalidPacket));
                 };
                 s.core.send_acl(id, frame)
             };
@@ -411,7 +413,7 @@ impl<B: LinkBackend> Hci for HciController<B> {
                     let Some(event) = state.core.next_event() else {
                         break;
                     };
-                    if buf.encode(event, state.event_mask, state.le_mask) {
+                    if buf.encode(&event, state.event_mask, state.le_mask) {
                         return Ok(true);
                     }
                 }
@@ -457,23 +459,23 @@ impl<B: LinkBackend, C: AsyncCmd + ?Sized> ControllerCmdAsync<C> for HciControll
 }
 
 /// Borrowed bt-hci endpoint sharing the original controller's state and waiters.
-#[cfg(feature = "external-wake")]
+#[cfg(any(feature = "external-wake", feature = "data-length"))]
 #[derive(Debug)]
 pub struct HciControllerRef<'a, B: LinkBackend>(&'a HciController<B>);
 
-#[cfg(feature = "external-wake")]
+#[cfg(any(feature = "external-wake", feature = "data-length"))]
 impl<B: LinkBackend> Copy for HciControllerRef<'_, B> {}
-#[cfg(feature = "external-wake")]
+#[cfg(any(feature = "external-wake", feature = "data-length"))]
 impl<B: LinkBackend> Clone for HciControllerRef<'_, B> {
     fn clone(&self) -> Self {
         *self
     }
 }
-#[cfg(feature = "external-wake")]
+#[cfg(any(feature = "external-wake", feature = "data-length"))]
 impl<B: LinkBackend> embedded_io::ErrorType for HciControllerRef<'_, B> {
     type Error = HciError<B::Error>;
 }
-#[cfg(feature = "external-wake")]
+#[cfg(any(feature = "external-wake", feature = "data-length"))]
 impl<B: LinkBackend> Hci for HciControllerRef<'_, B> {
     type Buffer<'a> = HciBuffer;
 
@@ -496,13 +498,13 @@ impl<B: LinkBackend> Hci for HciControllerRef<'_, B> {
         self.0.read(buf)
     }
 }
-#[cfg(feature = "external-wake")]
+#[cfg(any(feature = "external-wake", feature = "data-length"))]
 impl<B: LinkBackend, C: SyncCmd + ?Sized> ControllerCmdSync<C> for HciControllerRef<'_, B> {
     fn exec(&self, cmd: &C) -> impl Future<Output = Result<C::Return, cmd::Error<Self::Error>>> {
         ControllerCmdSync::exec(self.0, cmd)
     }
 }
-#[cfg(feature = "external-wake")]
+#[cfg(any(feature = "external-wake", feature = "data-length"))]
 impl<B: LinkBackend, C: AsyncCmd + ?Sized> ControllerCmdAsync<C> for HciControllerRef<'_, B> {
     fn exec(&self, cmd: &C) -> impl Future<Output = Result<(), cmd::Error<Self::Error>>> {
         ControllerCmdAsync::exec(self.0, cmd)

@@ -100,7 +100,8 @@ fn test_should_run_upstream_host_mtu_read_write_subscription_notification_and_di
         .build();
     let handle = value.handle.to_le_bytes();
     let cccd = value.cccd_handle.unwrap().to_le_bytes();
-    let server = AttributeServer::<NoopRawMutex, DefaultPacketPool, 12, 1>::new(table);
+    let server =
+        AttributeServer::<NoopRawMutex, ble_host_trouble::HostPacketPool, 12, 1>::new(table);
     let mut peripheral = stack.peripheral();
     let mut runner = stack.runner();
     let connected = Cell::new(false);
@@ -193,7 +194,12 @@ fn test_should_run_upstream_host_mtu_read_write_subscription_notification_and_di
         .filter(|f| f.kind() == FrameKind::Start)
         .map(|f| &f.payload()[4..])
         .collect();
-    assert!(data.contains(&&[3, 23, 0][..]));
+    let mtu = if cfg!(feature = "extended-mtu") {
+        64
+    } else {
+        23
+    };
+    assert!(data.contains(&&[3, mtu, 0][..]));
     assert!(data.contains(&&[0x0b, 0x11][..]));
     assert!(data.contains(&&[0x1b, handle[0], handle[1], 0xa5][..]));
 }

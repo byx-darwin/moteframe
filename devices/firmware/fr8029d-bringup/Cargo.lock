@@ -15,7 +15,9 @@ name = "ble-host-trouble"
 version = "0.1.0"
 dependencies = [
  "ble-controller",
+ "embassy-sync",
  "portable-atomic",
+ "static_cell",
  "trouble-host",
 ]
 
@@ -192,6 +194,7 @@ dependencies = [
  "embassy-sync",
  "embassy-time",
  "embassy-time-driver",
+ "heapless",
  "moteframe-ble",
 ]
 

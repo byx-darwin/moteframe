@@ -8,6 +8,7 @@ publish = false
 [workspace]
 
 [dependencies]
+heapless = { version = "=0.9.3", default-features = false, optional = true }
 ble-controller = { path = "../../crates/ble-controller", version = "=0.1.0", default-features = false, optional = true }
 ble-host-trouble = { path = "../../crates/ble-host-trouble", version = "=0.1.0", default-features = false, optional = true }
 critical-section = { version = "=1.2.0", default-features = false, features = ["restore-state-bool"], optional = true }
@@ -26,9 +27,12 @@ ble-adv-probe = []
 ble-adv-cold = ["ble-adv-probe"]
 ble-adv-cold-xip = ["ble-adv-cold"]
 ble-connect-probe = ["ble-adv-cold"]
-ble-gatt-probe = ["dep:ble-controller", "dep:ble-host-trouble", "dep:embassy-sync", "dep:moteframe-ble"]
+ble-gatt-probe = ["dep:heapless", "dep:ble-controller", "dep:ble-host-trouble", "dep:embassy-sync", "dep:moteframe-ble"]
 ble-gatt-board = ["ble-connect-probe", "ble-gatt-probe", "dep:critical-section", "dep:embassy-time-driver"]
+ble-gatt-mac-probe = ["ble-gatt-probe"]
 ble-gatt-xip = ["ble-gatt-board", "ble-adv-cold-xip"]
+ble-gatt-1m-only = ["ble-gatt-board"]
+ble-gatt-dle = ["ble-gatt-probe", "ble-controller/data-length", "ble-host-trouble/extended-mtu"]
 ble-gatt-freertos = ["ble-gatt-board"]
 ble-gatt-event-driven = ["ble-gatt-probe", "ble-controller/external-wake"]
 

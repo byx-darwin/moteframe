@@ -18,6 +18,7 @@ use std::{
 #[derive(Debug, Default)]
 struct State {
     events: VecDeque<LinkEvent>,
+    lengths: Option<DataLength>,
     sent: Vec<(u32, LinkFrame)>,
     #[cfg(feature = "external-wake")]
     tx_backpressured: bool,
@@ -32,6 +33,15 @@ struct State {
 struct Backend(Rc<RefCell<State>>);
 impl LinkBackend for Backend {
     type Error = ();
+    fn supports_data_length(&self) -> bool {
+        self.0.borrow().lengths.is_some()
+    }
+    fn data_length_updated(&mut self, limits: DataLength) {
+        self.0.borrow_mut().lengths = Some(limits);
+    }
+    fn max_acl_fragment_len(&self) -> u8 {
+        if self.supports_data_length() { 251 } else { 27 }
+    }
     fn reset(&mut self) -> Result<(), ()> {
         self.0.borrow_mut().events.clear();
         self.0.borrow_mut().radio_active = false;
@@ -609,4 +619,96 @@ fn test_should_replace_cancelled_writer_waker_without_borrow_during_destructor_r
         slot.borrow_mut().take();
     });
     assert!(result.is_ok());
+}
+
+#[cfg(feature = "data-length")]
+#[test]
+fn negotiates_and_transfers_full_hci_acl_payload_both_ways() {
+    let (h, b) = setup();
+    assert!(h.command(0x202f, &[]).is_err());
+    b.0.borrow_mut().lengths = Some(DataLength::LEGACY);
+    assert_eq!(h.command(0x2002, &[]).unwrap().as_slice(), &[251, 0, 4]);
+    assert_eq!(h.command(0x2003, &[]).unwrap().as_slice()[0] & 0x20, 0x20);
+    assert_eq!(
+        h.command(0x202f, &[]).unwrap().as_slice(),
+        &[251, 0, 72, 8, 251, 0, 72, 8]
+    );
+    advertise(&h);
+    b.0.borrow_mut().events.push_back(LinkEvent::Connected(
+        Peer::new([7; 6], true),
+        ConnectionParameters::new(24, 0, 72).unwrap(),
+    ));
+    let mut buf = h.alloc_buf().unwrap();
+    run(h.read(&mut buf)).unwrap();
+    let (token, request) = b.0.borrow().sent[0];
+    assert_eq!(request.payload(), &[0x14, 251, 0, 72, 8, 251, 0, 72, 8]);
+    let rsp = LinkEvent::Received(
+        LinkFrame::new(FrameKind::Control, &[0x15, 251, 0, 72, 8, 251, 0, 72, 8]).unwrap(),
+    );
+    b.0.borrow_mut()
+        .events
+        .extend([LinkEvent::Acknowledged(token), rsp]);
+    let changed = run(h.read(&mut buf)).unwrap();
+    assert!(
+        matches!(changed, bt_hci::ControllerToHostPacket::Event(e) if e.kind == bt_hci::event::EventKind::Le && e.data == [7,1,0,251,0,72,8,251,0,72,8])
+    );
+    let bytes: Vec<u8> = (0..251).collect();
+    let frame = LinkFrame::new(FrameKind::Start, &bytes).unwrap();
+    let packet = AclPacket::new(
+        ConnHandle::new(1),
+        AclPacketBoundary::FirstNonFlushable,
+        AclBroadcastFlag::PointToPoint,
+        &bytes,
+    );
+    run(h.write_acl_data(&packet)).unwrap();
+    h.service().unwrap();
+    assert_eq!(b.0.borrow().sent[1].1, frame);
+    let token = b.0.borrow().sent[1].0;
+    b.0.borrow_mut()
+        .events
+        .extend([LinkEvent::Received(frame), LinkEvent::Acknowledged(token)]);
+    assert!(
+        matches!(run(h.read(&mut buf)).unwrap(), bt_hci::ControllerToHostPacket::Acl(p) if p.data() == bytes)
+    );
+    assert!(
+        matches!(run(h.read(&mut buf)).unwrap(), bt_hci::ControllerToHostPacket::Event(e) if e.kind == bt_hci::event::EventKind::NumberOfCompletedPackets)
+    );
+}
+
+#[cfg(feature = "data-length")]
+#[test]
+fn host_suggestions_survive_disconnect_and_reset_to_the_hci_default() {
+    let (h, b) = setup();
+    b.0.borrow_mut().lengths = Some(DataLength::MAX);
+    assert_eq!(h.command(0x2023, &[]).unwrap().as_slice(), &[27, 0, 72, 1]);
+    assert!(h.command(0x2024, &[26, 0, 72, 8]).is_err());
+    assert!(h.command(0x2024, &[251, 0, 71, 1]).is_err());
+    let suggestion = [100, 0, 0x00, 0x10];
+    h.command(0x2024, &suggestion).unwrap();
+    assert_eq!(h.command(0x2023, &[]).unwrap().as_slice(), suggestion);
+    let mut buf = h.alloc_buf().unwrap();
+    for handle in [1, 2] {
+        advertise(&h);
+        b.0.borrow_mut().events.push_back(LinkEvent::Connected(
+            Peer::new([7; 6], true),
+            ConnectionParameters::new(24, 0, 72).unwrap(),
+        ));
+        run(h.read(&mut buf)).unwrap();
+        assert_eq!(b.0.borrow().lengths, Some(DataLength::LEGACY));
+        let (token, request) = *b.0.borrow().sent.last().unwrap();
+        assert_eq!(request.payload(), &[0x14, 251, 0, 72, 8, 100, 0, 72, 8]);
+        let rejected = LinkFrame::new(FrameKind::Control, &[7, 0x14]).unwrap();
+        b.0.borrow_mut().events.extend([
+            LinkEvent::Acknowledged(token),
+            LinkEvent::Received(rejected),
+        ]);
+        h.service().unwrap();
+        assert!(h.command(0x2022, &[handle, 0, 251, 0, 72, 8]).is_err());
+        b.0.borrow_mut()
+            .events
+            .push_back(LinkEvent::Disconnected(0x13));
+        run(h.read(&mut buf)).unwrap();
+    }
+    run(Reset::new().exec(&h)).unwrap();
+    assert_eq!(h.command(0x2023, &[]).unwrap().as_slice(), &[27, 0, 72, 1]);
 }

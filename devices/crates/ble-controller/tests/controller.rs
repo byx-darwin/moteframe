@@ -7,11 +7,47 @@ use std::collections::VecDeque;
 struct Backend {
     events: VecDeque<LinkEvent>,
     sent: Vec<(u32, LinkFrame)>,
+    #[cfg(feature = "data-length")]
+    maintenance: usize,
     busy: bool,
     fail: bool,
+    short_fragments: bool,
+    lengths: Option<DataLength>,
+    peer_two_m: Option<bool>,
 }
 impl LinkBackend for Backend {
     type Error = ();
+    #[cfg(feature = "data-length")]
+    fn service_backpressure(&mut self) -> Result<(), ()> {
+        self.maintenance += 1;
+        Ok(())
+    }
+    fn supports_data_length(&self) -> bool {
+        self.lengths.is_some()
+    }
+    fn data_length_updated(&mut self, limits: DataLength) {
+        self.lengths = Some(limits);
+    }
+    fn supports_two_m(&self) -> bool {
+        self.peer_two_m.is_some()
+    }
+    fn peer_two_m(&mut self, supported: bool) {
+        if let Some(peer) = self.peer_two_m.as_mut() {
+            *peer = supported;
+        }
+    }
+    fn phy_response_mask(&mut self) -> u8 {
+        3
+    }
+    fn max_acl_fragment_len(&self) -> u8 {
+        if self.short_fragments {
+            15
+        } else if self.lengths.is_some() {
+            251
+        } else {
+            27
+        }
+    }
     fn reset(&mut self) -> Result<(), Self::Error> {
         self.events.clear();
         Ok(())
@@ -65,6 +101,40 @@ fn connected() -> Controller<Backend> {
 }
 fn frame(n: u8) -> LinkFrame {
     LinkFrame::new(FrameKind::Start, &[0, 0, 4, n]).unwrap()
+}
+
+#[test]
+fn completes_one_host_packet_after_both_radio_fragments_are_acknowledged() {
+    let mut core = connected();
+    let id = core.connection().unwrap();
+    core.backend_mut().short_fragments = true;
+    let mut payload = [0x29; 27];
+    payload[..4].copy_from_slice(&[23, 0, 4, 0]);
+    core.send_acl(id, LinkFrame::new(FrameKind::Start, &payload).unwrap())
+        .unwrap();
+    core.service().unwrap();
+    let (first_token, first) = core.backend_mut().sent[0];
+    assert_eq!(first.as_pdu()[0], 0x12);
+    assert_eq!(first.payload(), &payload[..15]);
+    core.backend_mut()
+        .events
+        .push_back(LinkEvent::Acknowledged(first_token));
+    core.service().unwrap();
+    assert!(core.next_event().is_none());
+    assert_eq!(core.pending_acl(), 1);
+
+    let (last_token, last) = core.backend_mut().sent[1];
+    assert_eq!(last.kind(), FrameKind::Continuation);
+    assert_eq!(last.payload(), &payload[15..]);
+    core.backend_mut()
+        .events
+        .push_back(LinkEvent::Acknowledged(last_token));
+    core.service().unwrap();
+    assert_eq!(
+        core.next_event(),
+        Some(ControllerEvent::Completed { id, packets: 1 })
+    );
+    assert_eq!(core.pending_acl(), 0);
 }
 
 #[test]
@@ -179,4 +249,246 @@ fn test_should_reject_truncated_known_control_procedures() {
         LinkFrame::new(FrameKind::Control, &[0]).unwrap(),
     ));
     assert!(core.service().is_err());
+}
+
+#[test]
+fn feature_and_phy_responses_follow_radio_capabilities() {
+    for capable in [false, true] {
+        let mut core = connected();
+        core.backend_mut().peer_two_m = capable.then_some(false);
+        let feature_req = LinkFrame::new(FrameKind::Control, &[8, 0, 1, 0, 0, 0, 0, 0, 0]).unwrap();
+        core.backend_mut()
+            .events
+            .push_back(LinkEvent::Received(feature_req));
+        core.service().unwrap();
+        let (token, features) = core.backend_mut().sent[0];
+        assert_eq!(
+            features.payload(),
+            &[9, 0, u8::from(capable), 0, 0, 0, 0, 0, 0]
+        );
+        assert_eq!(core.backend_mut().peer_two_m, capable.then_some(true));
+        let phy_req = LinkFrame::new(FrameKind::Control, &[0x16, 2, 2]).unwrap();
+        core.backend_mut()
+            .events
+            .extend([LinkEvent::Acknowledged(token), LinkEvent::Received(phy_req)]);
+        core.service().unwrap();
+        let expected: &[u8] = if capable { &[0x17, 3, 3] } else { &[7, 0x16] };
+        assert_eq!(core.backend_mut().sent[1].1.payload(), expected);
+    }
+}
+
+#[cfg(feature = "data-length")]
+#[test]
+fn exchanges_directional_lengths_once_and_limits_fragmentation_before_peer_response() {
+    let mut core = connected();
+    let id = core.connection().unwrap();
+    core.backend_mut().lengths = Some(DataLength::LEGACY);
+    let request = [0x14, 100, 0, 0xd0, 7, 251, 0, 0x48, 8];
+    let rx = |p: &[u8]| LinkEvent::Received(LinkFrame::new(FrameKind::Control, p).unwrap());
+    core.backend_mut().events.push_back(rx(&request));
+    core.service().unwrap();
+    let (token, response) = core.backend_mut().sent[0];
+    assert_eq!(
+        response.payload(),
+        &[0x15, 251, 0, 0x48, 8, 251, 0, 0x48, 8]
+    );
+    let limits = DataLength {
+        tx_octets: 100,
+        tx_time: 2000,
+        rx_octets: 251,
+        rx_time: 2120,
+    };
+    assert_eq!(core.backend_mut().lengths, Some(limits));
+    assert_eq!(
+        core.next_event(),
+        Some(ControllerEvent::DataLengthChanged { id, limits })
+    );
+    core.backend_mut()
+        .events
+        .extend([LinkEvent::Acknowledged(token), rx(&request)]);
+    core.service().unwrap();
+    assert!(core.next_event().is_none());
+    let token = core.backend_mut().sent[1].0;
+    let bytes: Vec<u8> = (0..251).collect();
+    core.send_acl(id, LinkFrame::new(FrameKind::Start, &bytes).unwrap())
+        .unwrap();
+    let mut last = token;
+    for (i, chunk) in bytes.chunks(100).enumerate() {
+        core.backend_mut()
+            .events
+            .push_back(LinkEvent::Acknowledged(last));
+        core.service().unwrap();
+        let (token, packet) = core.backend_mut().sent[2 + i];
+        assert_eq!(packet.payload(), chunk);
+        assert_eq!(
+            packet.kind(),
+            if i == 0 {
+                FrameKind::Start
+            } else {
+                FrameKind::Continuation
+            }
+        );
+        assert_eq!(core.pending_acl(), 1);
+        last = token;
+    }
+    core.backend_mut()
+        .events
+        .push_back(LinkEvent::Acknowledged(last));
+    core.service().unwrap();
+    assert_eq!(
+        core.next_event(),
+        Some(ControllerEvent::Completed { id, packets: 1 })
+    );
+}
+
+#[cfg(feature = "data-length")]
+#[test]
+fn crossed_requests_keep_the_local_procedure_open_until_its_response() {
+    let mut core = connected();
+    let id = core.connection().unwrap();
+    core.backend_mut().lengths = Some(DataLength::LEGACY);
+    core.service().unwrap();
+    let (token, request) = core.backend_mut().sent[0];
+    assert_eq!(request.payload()[0], 0x14);
+    let control = |p: &[u8]| LinkEvent::Received(LinkFrame::new(FrameKind::Control, p).unwrap());
+    core.backend_mut().events.extend([
+        LinkEvent::Acknowledged(token),
+        control(&[0x14, 28, 0, 72, 1, 250, 0, 72, 8]),
+        control(&[0x15, 251, 0, 72, 8, 251, 0, 72, 8]),
+    ]);
+    core.service().unwrap();
+    let asymmetric = DataLength {
+        tx_octets: 28,
+        tx_time: 328,
+        rx_octets: 250,
+        rx_time: 2120,
+    };
+    assert_eq!(
+        core.next_event(),
+        Some(ControllerEvent::DataLengthChanged {
+            id,
+            limits: asymmetric
+        })
+    );
+    assert_eq!(
+        core.next_event(),
+        Some(ControllerEvent::DataLengthChanged {
+            id,
+            limits: DataLength::MAX
+        })
+    );
+    assert_eq!(core.backend_mut().sent.last().unwrap().1.payload()[0], 0x15);
+    core.backend_mut()
+        .events
+        .push_back(control(&[0x15, 27, 0, 72, 1, 27, 0, 72, 1]));
+    core.service().unwrap();
+    assert!(core.next_event().is_none());
+    assert_eq!(core.backend_mut().lengths, Some(DataLength::MAX));
+}
+
+#[cfg(feature = "data-length")]
+#[test]
+fn full_receive_pool_leaves_next_packet_with_backend_then_drains_in_order() {
+    let mut core = connected();
+    let id = core.connection().unwrap();
+    core.backend_mut().lengths = Some(DataLength::LEGACY);
+    let control = |p: &[u8]| LinkEvent::Received(LinkFrame::new(FrameKind::Control, p).unwrap());
+    core.backend_mut()
+        .events
+        .push_back(control(&[0x14, 251, 0, 72, 8, 251, 0, 72, 8]));
+    for index in 0..4 {
+        core.backend_mut().events.push_back(LinkEvent::Received(
+            LinkFrame::new(FrameKind::Continuation, &[index; 251]).unwrap(),
+        ));
+    }
+    core.service().unwrap();
+    assert_eq!(core.backend_mut().events.len(), 2);
+    for _ in 0..3 {
+        let previous = core.backend_mut().maintenance;
+        core.service().unwrap();
+        assert_eq!(core.backend_mut().maintenance, previous + 1);
+        assert_eq!(core.backend_mut().events.len(), 2);
+    }
+    assert_eq!(
+        core.next_event(),
+        Some(ControllerEvent::DataLengthChanged {
+            id,
+            limits: DataLength::MAX
+        })
+    );
+    for index in 0..4 {
+        let Some(ControllerEvent::Acl { id: owner, frame }) = core.next_event() else {
+            panic!("missing received ACL");
+        };
+        assert_eq!(owner, id);
+        assert_eq!(frame.payload(), [index; 251]);
+        core.service().unwrap();
+    }
+    assert!(core.next_event().is_none());
+}
+
+#[cfg(feature = "data-length")]
+#[test]
+fn refused_length_procedure_keeps_four_long_host_credits_and_retries_at_27_octets() {
+    let mut core = connected();
+    let id = core.connection().unwrap();
+    core.backend_mut().lengths = Some(DataLength::LEGACY);
+    core.service().unwrap();
+    let first_token = core.backend_mut().sent[0].0;
+    let control = LinkFrame::new(FrameKind::Control, &[0x11, 0x14, 0x1a]).unwrap();
+    core.backend_mut().events.extend([
+        LinkEvent::Acknowledged(first_token),
+        LinkEvent::Received(control),
+    ]);
+    core.backend_mut().busy = true;
+    let bytes: Vec<u8> = (0..251).collect();
+    let frame = LinkFrame::new(FrameKind::Start, &bytes).unwrap();
+    for _ in 0..4 {
+        core.send_acl(id, frame).unwrap();
+    }
+    assert_eq!(core.send_acl(id, frame), Err(ControllerError::Capacity));
+    core.service().unwrap();
+    assert_eq!(core.backend_mut().sent.len(), 1);
+    core.backend_mut().busy = false;
+    for (index, chunk) in bytes.chunks(27).enumerate() {
+        core.service().unwrap();
+        let (token, fragment) = core.backend_mut().sent[index + 1];
+        assert_eq!(fragment.payload(), chunk);
+        assert_eq!(core.pending_acl(), 4);
+        core.backend_mut()
+            .events
+            .push_back(LinkEvent::Acknowledged(token));
+    }
+    core.service().unwrap();
+    assert_eq!(
+        core.next_event(),
+        Some(ControllerEvent::Completed { id, packets: 1 })
+    );
+    assert_eq!(core.pending_acl(), 3);
+    core.backend_mut()
+        .events
+        .push_back(LinkEvent::Disconnected(8));
+    core.service().unwrap();
+    assert_eq!(core.pending_acl(), 0);
+    assert!(core.send_acl(id, frame).is_err());
+}
+
+#[cfg(feature = "data-length")]
+#[test]
+fn ignores_unsolicited_length_response_while_hardware_has_not_committed_request() {
+    let mut core = connected();
+    core.backend_mut().lengths = Some(DataLength::LEGACY);
+    core.backend_mut().busy = true;
+    core.service().unwrap();
+    let response =
+        LinkFrame::new(FrameKind::Control, &[0x15, 251, 0, 72, 8, 251, 0, 72, 8]).unwrap();
+    core.backend_mut()
+        .events
+        .push_back(LinkEvent::Received(response));
+    core.service().unwrap();
+    assert_eq!(core.backend_mut().lengths, Some(DataLength::LEGACY));
+    assert!(core.next_event().is_none());
+    core.backend_mut().busy = false;
+    core.service().unwrap();
+    assert_eq!(core.backend_mut().sent[0].1.payload()[0], 0x14);
 }

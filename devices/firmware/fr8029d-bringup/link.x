@@ -4,21 +4,30 @@ __sram_image_size = DEFINED(__wide_sram_probe) ? 8K : 4K;
 __gatt_sram = DEFINED(__gatt_board_probe) && DEFINED(__probe_in_sram);
 __gatt_event = DEFINED(__gatt_event_wake);
 __rtos = DEFINED(__gatt_freertos);
+/* Shift stack and executable together, keeping MSP capacity and the tested SRAM ceiling. */
+__bare_gatt_sram = !__rtos && __gatt_sram;
 __event_rtos_sram = __gatt_sram && __gatt_event && __rtos;
-__image_origin = __gatt_sram ? (__rtos ? (__gatt_event ? 0x20007600 : 0x20008000)
-                                    : (__gatt_event ? 0x20008000 : 0x20009800)) :
+/* SDK v0.3.6 starts application SRAM at 0x20001818. Keep the ROM area
+   and align our SRAM-only layout to the next vector boundary. */
+__sram_shift = __gatt_sram && DEFINED(__gatt_dle) ? 0x1600 : 0;
+__pool_space = DEFINED(__gatt_dle) && !__bare_gatt_sram ? 0x600 : 0;
+__rtos_event_image = 0x20006e00;
+__image_origin = __gatt_sram ? (__rtos ? (__gatt_event ? __rtos_event_image : 0x20008000)
+                                    : (__gatt_event ? 0x20007a00 : 0x20008e00)) - __sram_shift + __pool_space :
     (DEFINED(__probe_in_sram) ? 0x20003000 : 0x10002000);
+__gatt_flash_budget = (__rtos ? 72K : (__gatt_event ? 68K : 64K)) + (DEFINED(__gatt_dle) ? 8K : 0);
 __image_length = __gatt_sram ? 0x20018000 - __image_origin :
-    (__rtos ? 72K : (DEFINED(__gatt_board_probe) ? (__gatt_event ? 64K : 60K) :
-    (DEFINED(__probe_in_sram) ? __sram_image_size : 1016K)));
+    (DEFINED(__gatt_board_probe) ? __gatt_flash_budget :
+    (DEFINED(__probe_in_sram) ? __sram_image_size : 1016K));
 __ram_origin = DEFINED(__probe_in_sram) && !DEFINED(__gatt_board_probe)
-    ? 0x20003000 + __sram_image_size : 0x20003000;
-__ram_limit = __rtos ? 0x20003400 :
-    (DEFINED(__gatt_board_probe) ? 0x20004000 : 0x20006f00);
+    ? 0x20003000 + __sram_image_size : 0x20003000 - __sram_shift;
+/* The event-driven SRAM trial uses 768 bytes for static RAM and 14 KiB for task stacks. */
+__ram_limit = (__rtos ? (__event_rtos_sram ? 0x20003300 : 0x20003400) :
+    (__bare_gatt_sram ? 0x20003a00 : (DEFINED(__gatt_board_probe) ? 0x20004000 : 0x20006f00))) - __sram_shift + __pool_space;
 __diag_origin = __gatt_sram ? __image_origin - 0x100 : (__rtos ? 0x20007f00 :
-    (DEFINED(__gatt_board_probe) ? 0x20009700 : 0x20006f00));
-__stack_bottom = __rtos ? (__event_rtos_sram ? 0x20007000 : 0x20007800) :
-    (DEFINED(__gatt_board_probe) ? 0x20004000 : 0x20007000);
+    (DEFINED(__gatt_board_probe) ? 0x20009700 : 0x20006f00)) + __pool_space;
+__stack_bottom = (__rtos ? (__event_rtos_sram ? 0x20006b00 : 0x20007800) :
+    (__bare_gatt_sram ? 0x20003a00 : (DEFINED(__gatt_board_probe) ? 0x20004000 : 0x20007000))) - __sram_shift + __pool_space;
 __stack_limit = DEFINED(__gatt_board_probe) ? __diag_origin : 0x20008000;
 
 MEMORY {

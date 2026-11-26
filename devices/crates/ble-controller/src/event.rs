@@ -1,9 +1,13 @@
 //! Owned event serialization at the HCI boundary.
 use crate::{ControllerEvent, FrameKind};
+#[cfg(feature = "data-length")]
+const HCI_BUFFER_SIZE: usize = 256;
+#[cfg(not(feature = "data-length"))]
+const HCI_BUFFER_SIZE: usize = 64;
 /// Per-read owned storage; no packet borrows a Controller or its backend.
 #[derive(Clone)]
 pub struct HciBuffer {
-    pub(crate) bytes: [u8; 64],
+    pub(crate) bytes: [u8; HCI_BUFFER_SIZE],
     pub(crate) len: usize,
 }
 impl core::fmt::Debug for HciBuffer {
@@ -16,7 +20,7 @@ impl core::fmt::Debug for HciBuffer {
 impl HciBuffer {
     pub(crate) const fn new() -> Self {
         Self {
-            bytes: [0; 64],
+            bytes: [0; HCI_BUFFER_SIZE],
             len: 0,
         }
     }
@@ -27,8 +31,13 @@ impl HciBuffer {
         self.bytes[3..3 + payload.len()].copy_from_slice(payload);
         self.len = 3 + payload.len();
     }
-    pub(crate) fn encode(&mut self, event: ControllerEvent, event_mask: u64, le_mask: u64) -> bool {
-        match event {
+    pub(crate) fn encode(
+        &mut self,
+        event: &ControllerEvent,
+        event_mask: u64,
+        le_mask: u64,
+    ) -> bool {
+        match *event {
             ControllerEvent::Connected {
                 id,
                 peer,
@@ -72,6 +81,31 @@ impl HciBuffer {
                 }
                 let h = id.handle().to_le_bytes();
                 self.packet(5, &[0, h[0], h[1], reason]);
+            }
+            #[cfg(feature = "data-length")]
+            ControllerEvent::DataLengthChanged { id, limits } => {
+                if event_mask & (1 << 61) == 0 || le_mask & (1 << 6) == 0 {
+                    return false;
+                }
+                let mut p = [0; 11];
+                p[0] = 7;
+                for (bytes, field) in p[1..].chunks_exact_mut(2).zip([
+                    id.handle(),
+                    limits.tx_octets,
+                    limits.tx_time,
+                    limits.rx_octets,
+                    limits.rx_time,
+                ]) {
+                    bytes.copy_from_slice(&field.to_le_bytes());
+                }
+                self.packet(0x3e, &p);
+            }
+            ControllerEvent::PhyUpdated { id, tx, rx } => {
+                if event_mask & (1 << 61) == 0 || le_mask & (1 << 11) == 0 {
+                    return false;
+                }
+                let [lo, hi] = id.handle().to_le_bytes();
+                self.packet(0x3e, &[0x0c, 0, lo, hi, tx, rx]);
             }
             ControllerEvent::ParametersUpdated { id, parameters } => {
                 if event_mask & (1 << 61) == 0 || le_mask & (1 << 2) == 0 {

@@ -6,22 +6,22 @@ pub struct QueueFull;
 
 /// A bounded FIFO with no allocator, overwrite or internal synchronization.
 #[derive(Debug)]
-pub struct OwnedQueue<T: Copy, const N: usize> {
+pub struct OwnedQueue<T, const N: usize> {
     elements: [Option<T>; N],
     head: usize,
     len: usize,
 }
-impl<T: Copy, const N: usize> Default for OwnedQueue<T, N> {
+impl<T, const N: usize> Default for OwnedQueue<T, N> {
     fn default() -> Self {
         Self::new()
     }
 }
-impl<T: Copy, const N: usize> OwnedQueue<T, N> {
+impl<T, const N: usize> OwnedQueue<T, N> {
     /// Empty storage; a zero-capacity queue always rejects admission.
     #[must_use]
     pub const fn new() -> Self {
         Self {
-            elements: [None; N],
+            elements: [const { None }; N],
             head: 0,
             len: 0,
         }
@@ -67,6 +67,15 @@ impl<T: Copy, const N: usize> OwnedQueue<T, N> {
             self.elements[self.head].as_ref()
         }
     }
+    /// Borrows the oldest element while retaining its place in the queue.
+    #[cfg(not(feature = "data-length"))]
+    pub(crate) fn front_mut(&mut self) -> Option<&mut T> {
+        if self.is_empty() {
+            None
+        } else {
+            self.elements[self.head].as_mut()
+        }
+    }
     /// Removes exactly one oldest element.
     pub fn pop(&mut self) -> Option<T> {
         if self.is_empty() {
@@ -79,7 +88,7 @@ impl<T: Copy, const N: usize> OwnedQueue<T, N> {
     }
     /// Drops all queued work, for an explicit reset or disconnected epoch.
     pub fn clear(&mut self) {
-        self.elements = [None; N];
+        self.elements = [const { None }; N];
         self.head = 0;
         self.len = 0;
     }

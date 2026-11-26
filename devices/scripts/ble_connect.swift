@@ -33,12 +33,29 @@ struct WriteExchange {
     }
 }
 
+enum AdvertisementMatch: String {
+    case localName = "local_name"
+    case manufacturerData = "manufacturer_data"
+}
+
 enum ProbeProfile: String {
     case rustLink = "RUST-LINK"
     case bare = "FR29-GAT2"
     case freeRTOS = "FR29-RTOS"
 
+    private static let bareMarker = Data([0xff, 0xff] + Array("MFR29A1".utf8))
+    private static let freeRTOSMarker = Data([0xff, 0xff] + Array("MFR29R1".utf8))
+
     var rounds: Int { self == .rustLink ? 1 : 2 }
+
+    func matchAdvertisement(localName: String?, manufacturerData: Data?) -> AdvertisementMatch? {
+        if self != .rustLink,
+           manufacturerData == Self.bareMarker || manufacturerData == Self.freeRTOSMarker {
+            let expected = self == .bare ? Self.bareMarker : Self.freeRTOSMarker
+            return manufacturerData == expected ? .manufacturerData : nil
+        }
+        return localName == rawValue ? .localName : nil
+    }
 
     var serviceID: CBUUID {
         CBUUID(string: self == .rustLink ? "7B76CDA0-7B53-4E09-A85C-0135939A0001"
@@ -57,7 +74,7 @@ enum ProbeProfile: String {
                 expectedReply: Data([0xa5, 0x5a, 0x10, 0x20, 0x30, 0x40, 0x50, 0x60])
             )
         }
-        let request = Data((round == 1 ? "FR29NT75" : "FR29RC02").utf8)
+        let request = Data((round == 1 ? "FR29NT75-0123456789A" : "FR29RC02-abcdefghijZ").utf8)
         return WriteExchange(request: request, expectedReply: request)
     }
 }
@@ -198,8 +215,10 @@ final class LinkCentral: NSObject, CBCentralManagerDelegate, CBPeripheralDelegat
                         advertisementData: [String: Any], rssi RSSI: NSNumber) {
         guard phase == .scan else { return }
         advertisementReports += 1
-        guard advertisementData[CBAdvertisementDataLocalNameKey] as? String == probe.rawValue
-        else { return }
+        guard let match = probe.matchAdvertisement(
+            localName: advertisementData[CBAdvertisementDataLocalNameKey] as? String,
+            manufacturerData: advertisementData[CBAdvertisementDataManufacturerDataKey] as? Data
+        ) else { return }
         matchingAdvertisements += 1
         guard advertisementData[CBAdvertisementDataIsConnectable] as? Bool == true,
               identity == nil || identity == peripheral.identifier else { return }
@@ -209,7 +228,7 @@ final class LinkCentral: NSObject, CBCentralManagerDelegate, CBPeripheralDelegat
         peripheral.delegate = self
         central.stopScan()
         phase = .connect
-        report("connect_attempt", ["rssi": RSSI])
+        report("connect_attempt", ["rssi": RSSI, "matched_by": match.rawValue])
         central.connect(peripheral)
     }
 
@@ -252,12 +271,12 @@ final class LinkCentral: NSObject, CBCentralManagerDelegate, CBPeripheralDelegat
     func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
         guard peripheral === target, phase == .serviceDiscovery else { return }
         let services = peripheral.services ?? []
-        discovered = error == nil && !services.isEmpty
         report("services", ["count": services.count, "error": error?.localizedDescription ?? "none"])
         guard error == nil, let service = services.first(where: { $0.uuid == serviceID }) else {
             fail(error?.localizedDescription ?? "expected service not found")
             return
         }
+        discovered = true
         phase = .characteristicDiscovery
         peripheral.discoverCharacteristics([characteristicID], for: service)
     }
@@ -324,6 +343,20 @@ final class LinkCentral: NSObject, CBCentralManagerDelegate, CBPeripheralDelegat
 }
 
 #if BLE_CONNECT_TESTS
+func testProbeAdvertisementMatching() {
+    let bare = Data([0xff, 0xff, 0x4d, 0x46, 0x52, 0x32, 0x39, 0x41, 0x31])
+    let freeRTOS = Data([0xff, 0xff, 0x4d, 0x46, 0x52, 0x32, 0x39, 0x52, 0x31])
+    precondition(ProbeProfile.bare.matchAdvertisement(localName: nil, manufacturerData: bare) == .manufacturerData,
+                 "a bare-metal report with the bench marker must match without a local name")
+    precondition(ProbeProfile.freeRTOS.matchAdvertisement(localName: nil, manufacturerData: freeRTOS) == .manufacturerData)
+    precondition(ProbeProfile.freeRTOS.matchAdvertisement(localName: nil, manufacturerData: bare) == nil)
+    precondition(ProbeProfile.freeRTOS.matchAdvertisement(localName: "FR29-RTOS", manufacturerData: bare) == nil)
+    precondition(ProbeProfile.bare.matchAdvertisement(localName: nil, manufacturerData: Data(bare.dropLast())) == nil)
+    precondition(ProbeProfile.bare.matchAdvertisement(localName: "FR29-GAT2", manufacturerData: nil) == .localName)
+    precondition(ProbeProfile.rustLink.matchAdvertisement(localName: "RUST-LINK", manufacturerData: nil) == .localName)
+    precondition(ProbeProfile.rustLink.matchAdvertisement(localName: nil, manufacturerData: bare) == nil)
+}
+
 func testProbeExchanges() {
     precondition(ProbeOptions.parse([])?.probe == .rustLink)
     precondition(ProbeOptions.parse(["FR29-GAT2", "--timeout", "12"])?.timeout == 12)
@@ -340,7 +373,7 @@ func testProbeExchanges() {
     for probe in [ProbeProfile.bare, .freeRTOS] {
         var first = probe.exchange(round: 1)
         var second = probe.exchange(round: 2)
-        precondition(probe.rounds == 2 && first.request.count == 8 && second.request.count == 8)
+        precondition(probe.rounds == 2 && first.request.count == 20 && second.request.count == 20)
         precondition(first.request != second.request)
         precondition(first.observe(first.request) && !first.isVerified)
         first.acknowledge()
@@ -350,8 +383,9 @@ func testProbeExchanges() {
         precondition(second.observe(second.request) && second.isVerified)
     }
 }
+testProbeAdvertisementMatching()
 testProbeExchanges()
-print("BLE probe exchanges passed")
+print("BLE probe advertisement and exchange checks passed")
 #else
 let arguments = Array(CommandLine.arguments.dropFirst())
 if arguments == ["--help"] {

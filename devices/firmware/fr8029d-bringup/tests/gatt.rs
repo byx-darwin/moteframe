@@ -112,8 +112,8 @@ fn pump_until(pump: &mut impl FnMut(), done: impl Fn() -> bool) {
 
 #[test]
 fn test_should_leave_a_short_attribute_table_untouched() {
-    let mut storage = [0; 8];
-    let mut table: AttributeTable<'_, NoopRawMutex, 3> = AttributeTable::new();
+    let mut storage = [0; fr8029d_bringup::gatt::VALUE_LEN];
+    let mut table: AttributeTable<'_, NoopRawMutex, 11> = AttributeTable::new();
     assert!(GattProfile::add(&mut table, &mut storage).is_err());
     assert_eq!(table.len(), 0);
 }
@@ -133,10 +133,11 @@ fn test_should_discover_read_and_commit_only_complete_write_requests() {
         &mut resources,
         RandomAddress::new([1, 2, 3, 4, 5, 0xc0]).unwrap(),
     );
-    let mut storage = [0xa5; 8];
-    let mut table: AttributeTable<'_, NoopRawMutex, 4> = AttributeTable::new();
+    let mut storage = [0xa5; fr8029d_bringup::gatt::VALUE_LEN];
+    let mut table: AttributeTable<'_, NoopRawMutex, 12> = AttributeTable::new();
     let profile = GattProfile::add(&mut table, &mut storage).unwrap();
-    let server = AttributeServer::<NoopRawMutex, DefaultPacketPool, 4, 1>::new(table);
+    let server =
+        AttributeServer::<NoopRawMutex, ble_host_trouble::HostPacketPool, 12, 1>::new(table);
     let mut runner = stack.runner();
     let mut peripheral = stack.peripheral();
     let connected = Cell::new(false);
@@ -169,7 +170,7 @@ fn test_should_discover_read_and_commit_only_complete_write_requests() {
                 .await
                 .unwrap()
             {
-                GattProgress::Continue => {}
+                GattProgress::Continue | GattProgress::SdkSubscribed => {}
                 GattProgress::Committed => committed.set(committed.get() + 1),
                 GattProgress::Disconnected => break,
             }
@@ -193,13 +194,18 @@ fn test_should_discover_read_and_commit_only_complete_write_requests() {
     ));
     pump_until(&mut pump, || connected.get());
 
-    radio.exchange(&mut pump, &[0x02, 64, 0], &[0x03, 23, 0]);
+    let mtu = if cfg!(feature = "ble-gatt-dle") {
+        64
+    } else {
+        23
+    };
+    radio.exchange(&mut pump, &[0x02, 64, 0], &[0x03, mtu, 0]);
     radio.exchange(
         &mut pump,
         &[0x10, 1, 0, 0xff, 0xff, 0x00, 0x28],
         &[
-            0x11, 20, 1, 0, 0xff, 0xff, 0x51, 0xb2, 0x35, 0xc7, 0xeb, 0xd6, 0x4e, 0xa6, 0xb0, 0x48,
-            0xf7, 0x7f, 0xd0, 0x29, 0x80, 0x2f,
+            0x11, 20, 1, 0, 4, 0, 0x51, 0xb2, 0x35, 0xc7, 0xeb, 0xd6, 0x4e, 0xa6, 0xb0, 0x48, 0xf7,
+            0x7f, 0xd0, 0x29, 0x80, 0x2f,
         ],
     );
     radio.exchange(
@@ -211,13 +217,7 @@ fn test_should_discover_read_and_commit_only_complete_write_requests() {
         ],
     );
     radio.exchange(&mut pump, &[0x0a, 3, 0], &[0x0b, 0, 0, 0, 0, 0, 0, 0, 0]);
-    for invalid in [
-        &[0x12, 3, 0][..],
-        &[0x12, 3, 0, 0xff],
-        &[0x12, 3, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
-    ] {
-        radio.exchange(&mut pump, invalid, &[0x01, 0x12, 3, 0, 0x0d]);
-    }
+    radio.exchange(&mut pump, &[0x12, 3, 0], &[0x01, 0x12, 3, 0, 0x0d]);
     radio.exchange(
         &mut pump,
         &[0x16, 3, 0, 0, 0, 0xff],
@@ -305,6 +305,79 @@ fn externally_serviced_runner_re_advertises_if_att_reply_is_pending_at_disconnec
     );
 }
 
+#[test]
+fn exhausted_reply_or_notify_pool_recovers_and_accepts_next_client() {
+    use ble_host_trouble::{HostPacketPool, host::PacketPool};
+
+    let _fixture = HOST_FIXTURE.lock().unwrap();
+    for fail_notify in [false, true] {
+        let radio = ScriptedRadio::default();
+        let mut resources = Resources::new();
+        let reports = RefCell::new(Vec::new());
+        let held = RefCell::new(Vec::new());
+        let injected = Cell::new(false);
+        let identity = GattIdentity {
+            address: RandomAddress::new([1, 2, 3, 4, 5, 0xc0]).unwrap(),
+            version: Version::new(8, 0xffff, 1),
+            name: "FR29-GATT",
+            advertising_data: &[2, 1, 6],
+        };
+        let external = cfg!(feature = "ble-gatt-event-driven");
+        let mut app = pin!(run_fixture(
+            external,
+            radio.clone(),
+            &mut resources,
+            identity,
+            |event| {
+                if fail_notify
+                    && matches!(event, GattReport::Committed(_))
+                    && !injected.replace(true)
+                {
+                    while let Some(packet) = HostPacketPool::allocate() {
+                        held.borrow_mut().push(packet);
+                    }
+                }
+                reports.borrow_mut().push(event);
+            }
+        ));
+        // Model periodic connection-event ticks, including empty radio events.
+        let mut pump = fixture_pump(app.as_mut(), &radio, false);
+        let connected = LinkEvent::Connected(
+            Peer::new([7; 6], true),
+            ConnectionParameters::new(24, 0, 72).unwrap(),
+        );
+        pump_until(&mut pump, || reports.borrow().len() == 1);
+        radio.event(connected);
+        pump_until(&mut pump, || reports.borrow().len() == 2);
+        radio.exchange(&mut pump, &[0x12, 10, 0, 1, 0], &[0x13]);
+        if !fail_notify {
+            // Leave room for the incoming ATT request but not its reply.
+            for _ in 1..HostPacketPool::capacity() {
+                held.borrow_mut().push(HostPacketPool::allocate().unwrap());
+            }
+        }
+        radio.inject_att(&[0x12, 9, 0, 42]);
+        pump_until(&mut pump, || {
+            reports.borrow().last() == Some(&GattReport::Advertising)
+        });
+        assert!(!held.borrow().is_empty());
+        held.borrow_mut().clear();
+        radio.0.borrow_mut().replies.clear();
+        radio.event(connected);
+        pump_until(&mut pump, || {
+            reports.borrow().last() == Some(&GattReport::Connected)
+        });
+        radio.exchange(&mut pump, &[0x0a, 10, 0], &[0x0b, 0, 0]);
+        radio.exchange(&mut pump, &[0x12, 10, 0, 1, 0], &[0x13]);
+        radio.exchange(&mut pump, &[0x12, 9, 0, 43], &[0x13]);
+        pump_until(&mut pump, || !radio.0.borrow().replies.is_empty());
+        assert_eq!(
+            radio.0.borrow_mut().replies.pop_front().unwrap(),
+            [0x1b, 9, 0, 43]
+        );
+    }
+}
+
 async fn run_fixture(
     event_driven: bool,
     radio: ScriptedRadio,
@@ -348,6 +421,66 @@ fn fixture_pump<'a>(
     }
 }
 
+fn expected_commit(value: &[u8]) -> GattReport {
+    let mut bytes = [0; fr8029d_bringup::gatt::VALUE_LEN];
+    bytes[..value.len()].copy_from_slice(value);
+    GattReport::Committed(CommittedValue {
+        handle: 9,
+        length: value.len(),
+        bytes,
+    })
+}
+
+fn check_sdk_service(radio: &ScriptedRadio, pump: &mut impl FnMut()) {
+    radio.exchange(
+        pump,
+        &[0x10, 11, 0, 0xff, 0xff, 0x00, 0x28],
+        &[0x11, 6, 11, 0, 0xff, 0xff, 0xf0, 0xff],
+    );
+    radio.exchange(
+        pump,
+        &[0x08, 11, 0, 18, 0, 0x03, 0x28],
+        &[0x09, 7, 12, 0, 0x1a, 13, 0, 0xf3, 0xff],
+    );
+    radio.exchange(
+        pump,
+        &[0x08, 15, 0, 18, 0, 0x03, 0x28],
+        &[
+            0x09, 21, 16, 0, 2, 17, 0, 0xba, 0x5c, 0xff, 0xf4, 0x04, 0xa3, 0x40, 0x71, 0xa0, 0xb5,
+            0x35, 0x85, 0x3e, 0xb0, 0x83, 0x07,
+        ],
+    );
+    radio.exchange(
+        pump,
+        &[0x04, 14, 0, 15, 0],
+        &[0x05, 1, 14, 0, 2, 0x29, 15, 0, 1, 0x29],
+    );
+    radio.exchange(pump, &[0x04, 18, 0, 18, 0], &[0x05, 1, 18, 0, 1, 0x29]);
+    radio.exchange(pump, &[0x0a, 15, 0], b"\x0bCharacteristic 1\0");
+    radio.exchange(pump, &[0x0a, 18, 0], b"\x0bCharacteristic 2\0");
+    radio.exchange(pump, &[0x0a, 17, 0], &[0x0b, 0x11, 0x22, 0x33, 0x44, 0x55]);
+    radio.exchange(pump, &[0x12, 17, 0, 0xee], &[0x01, 0x12, 17, 0, 3]);
+    radio.exchange(pump, &[0x0a, 13, 0], &[0x0b, 0, 1, 2, 3, 4]);
+}
+
+fn subscribe_sdk(radio: &ScriptedRadio, pump: &mut impl FnMut()) {
+    for (cccd, error) in [
+        (&[1][..], 0x0d),
+        (&[1, 0, 0][..], 0x0d),
+        (&[2, 0][..], 0x13),
+    ] {
+        let mut request = vec![0x12, 14, 0];
+        request.extend_from_slice(cccd);
+        radio.exchange(pump, &request, &[0x01, 0x12, 14, 0, error]);
+    }
+    radio.exchange(pump, &[0x12, 14, 0, 1, 0], &[0x13]);
+    pump_until(pump, || !radio.0.borrow().replies.is_empty());
+    assert_eq!(
+        radio.0.borrow_mut().replies.pop_front().unwrap(),
+        [0x1b, 13, 0, 1, 2, 3, 4, 5]
+    );
+}
+
 fn exercise_runner(event_driven: bool) {
     let _fixture = HOST_FIXTURE.lock().unwrap();
     let radio = ScriptedRadio::default();
@@ -372,21 +505,19 @@ fn exercise_runner(event_driven: bool) {
     let peer = Peer::new([7; 6], true);
     let parameters = ConnectionParameters::new(24, 0, 72).unwrap();
     pump_until(&mut pump, || reports.borrow().len() == 1);
-    let advertisement = radio.0.borrow().advertisement.unwrap();
-    assert_eq!(advertisement.address.bytes(), [1, 2, 3, 4, 5, 0xc0]);
-    assert_eq!(
-        advertisement.data.as_slice(),
-        b"\x02\x01\x06\x0a\x09FR29-GATT"
-    );
+    check_advertisement(&radio);
     radio.event(LinkEvent::Connected(peer, parameters));
     pump_until(&mut pump, || reports.borrow().len() == 2);
+    check_sdk_service(&radio, &mut pump);
+    subscribe_sdk(&radio, &mut pump);
+    let mut sdk_write = vec![0x12, 13, 0];
+    sdk_write.extend(0..20);
+    radio.exchange(&mut pump, &sdk_write, &[0x13]);
+    radio.exchange(&mut pump, &[0x0a, 13, 0], &[0x0b, 0, 1, 2, 3, 4]);
+    radio.exchange(&mut pump, &[0x0a, 10, 0], &[0x0b, 0, 0]);
     radio.exchange(&mut pump, &[0x0a, 3, 0], b"\x0bFR29-GATT");
     radio.exchange(&mut pump, &[0x0a, 9, 0], &[0x0b, 0, 0, 0, 0, 0, 0, 0, 0]);
-    radio.exchange(
-        &mut pump,
-        &[0x12, 9, 0, 1, 2, 3, 4],
-        &[0x01, 0x12, 9, 0, 0x0d],
-    );
+    radio.exchange(&mut pump, &[0x12, 9, 0], &[0x01, 0x12, 9, 0, 0x0d]);
     assert_eq!(reports.borrow().len(), 2);
     radio.exchange(&mut pump, &[0x12, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8], &[0x13]);
     // The first write did not queue an echo. Discover and enable the CCCD.
@@ -396,13 +527,16 @@ fn exercise_runner(event_driven: bool) {
         &[0x05, 1, 10, 0, 0x02, 0x29],
     );
     radio.exchange(&mut pump, &[0x12, 10, 0, 1, 0], &[0x13]);
-    radio.exchange(&mut pump, &[0x12, 9, 0, 1], &[0x01, 0x12, 9, 0, 0x0d]);
+    radio.exchange(&mut pump, &[0x12, 9, 0], &[0x01, 0x12, 9, 0, 0x0d]);
     radio.exchange(&mut pump, &[0x12, 9, 0, 9, 8, 7, 6, 5, 4, 3, 2], &[0x13]);
     pump_until(&mut pump, || !radio.0.borrow().replies.is_empty());
     assert_eq!(
         radio.0.borrow_mut().replies.pop_front().unwrap(),
         [0x1b, 9, 0, 9, 8, 7, 6, 5, 4, 3, 2]
     );
+    radio.exchange(&mut pump, &[0x12, 14, 0, 0, 0], &[0x13]);
+    radio.exchange(&mut pump, &[0x0a, 10, 0], &[0x0b, 1, 0]);
+    subscribe_sdk(&radio, &mut pump);
     radio.exchange(&mut pump, &[0x12, 10, 0, 0, 0], &[0x13]);
     radio.exchange(&mut pump, &[0x12, 9, 0, 1, 1, 2, 3, 5, 8, 13, 21], &[0x13]);
     radio.exchange(&mut pump, &[0x12, 10, 0, 1, 0], &[0x13]);
@@ -410,6 +544,9 @@ fn exercise_runner(event_driven: bool) {
     pump_until(&mut pump, || reports.borrow().len() == 7);
     radio.event(LinkEvent::Connected(peer, parameters));
     pump_until(&mut pump, || reports.borrow().len() == 8);
+    radio.exchange(&mut pump, &[0x0a, 14, 0], &[0x0b, 0, 0]);
+    subscribe_sdk(&radio, &mut pump);
+    radio.exchange(&mut pump, &[0x12, 14, 0, 0, 0], &[0x13]);
     radio.exchange(&mut pump, &[0x0a, 10, 0], &[0x0b, 0, 0]);
     radio.exchange(&mut pump, &[0x0a, 9, 0], &[0x0b, 1, 1, 2, 3, 5, 8, 13, 21]);
     radio.exchange(&mut pump, &[0x12, 9, 0, 0, 1, 2, 3, 4, 5, 6, 7], &[0x13]);
@@ -422,27 +559,30 @@ fn exercise_runner(event_driven: bool) {
         &[
             GattReport::Advertising,
             GattReport::Connected,
-            GattReport::Committed(CommittedValue {
-                handle: 9,
-                bytes: [1, 2, 3, 4, 5, 6, 7, 8],
-            }),
-            GattReport::Committed(CommittedValue {
-                handle: 9,
-                bytes: [9, 8, 7, 6, 5, 4, 3, 2],
-            }),
-            GattReport::Committed(CommittedValue {
-                handle: 9,
-                bytes: [1, 1, 2, 3, 5, 8, 13, 21],
-            }),
+            expected_commit(&[1, 2, 3, 4, 5, 6, 7, 8]),
+            expected_commit(&[9, 8, 7, 6, 5, 4, 3, 2]),
+            expected_commit(&[1, 1, 2, 3, 5, 8, 13, 21]),
             GattReport::Disconnected,
             GattReport::Advertising,
             GattReport::Connected,
-            GattReport::Committed(CommittedValue {
-                handle: 9,
-                bytes: [0, 1, 2, 3, 4, 5, 6, 7],
-            }),
+            expected_commit(&[0, 1, 2, 3, 4, 5, 6, 7]),
         ]
     );
+    // Fill one complete ATT MTU, then shrink the value to prove that no old tail is returned.
+    radio.exchange(&mut pump, &[0x12, 10, 0, 1, 0], &[0x13]);
+    for value in [&b"12345678abcdefghij90"[..], &[0x81][..]] {
+        let mut request = vec![0x12, 9, 0];
+        request.extend_from_slice(value);
+        radio.exchange(&mut pump, &request, &[0x13]);
+        pump_until(&mut pump, || !radio.0.borrow().replies.is_empty());
+        let mut notify = vec![0x1b, 9, 0];
+        notify.extend_from_slice(value);
+        assert_eq!(radio.0.borrow_mut().replies.pop_front().unwrap(), notify);
+        assert_eq!(reports.borrow().last(), Some(&expected_commit(value)));
+        let mut read = vec![0x0b];
+        read.extend_from_slice(value);
+        radio.exchange(&mut pump, &[0x0a, 9, 0], &read);
+    }
 }
 
 #[test]
@@ -465,4 +605,23 @@ fn test_should_reject_an_oversized_advertisement_without_starting_radio() {
         std::task::Poll::Ready(GattRunError::Host(_))
     ));
     assert!(radio.0.borrow().advertisement.is_none());
+}
+
+fn check_advertisement(radio: &ScriptedRadio) {
+    let advertisement = radio.0.borrow().advertisement.unwrap();
+    assert_eq!(advertisement.address.bytes(), [1, 2, 3, 4, 5, 0xc0]);
+    let expected_interval = if cfg!(all(
+        feature = "ble-gatt-mac-probe",
+        not(feature = "ble-gatt-xip")
+    )) {
+        48
+    } else {
+        256
+    };
+    assert_eq!(advertisement.parameters.min_interval(), expected_interval);
+    assert_eq!(advertisement.parameters.max_interval(), expected_interval);
+    assert_eq!(
+        advertisement.data.as_slice(),
+        b"\x02\x01\x06\x0a\x09FR29-GATT"
+    );
 }

@@ -8,7 +8,15 @@ const HALF_US_PER_CONN_UNIT: i64 = 2500;
 const CONNECT_IND_AIRTIME_HALF_US: i64 = 704;
 // The configured FR8029D RX profile has a 40 us base and a 7 us PHY delay.
 const RX_TIMESTAMP_DELAY_HALF_US: i64 = 94;
-const RECEIVE_GUARD_HALF_US: i64 = 64;
+// The Mac SRAM probe uses the wider guard exercised by the board acceptance test.
+const RECEIVE_GUARD_HALF_US: i64 = if cfg!(all(
+    feature = "ble-gatt-mac-probe",
+    not(feature = "ble-gatt-xip")
+)) {
+    2_048
+} else {
+    64
+};
 // The control record extends the scheduler's RX window by 14 us.
 const RECEIVE_TAIL_HALF_US: i64 = 28;
 // Legacy 1M RX and TX at 27 octets plus the base event turnaround budget.
@@ -199,6 +207,10 @@ impl ConnectionRequest {
         words[0x32 / 2] = u16::from_le_bytes([ch0, ch1]);
         words[0x34 / 2] = u16::from_le_bytes([ch2, ch3]);
         words[0x36 / 2] = u16::from(ch4);
+        // The ROM peripheral initializer at 0x2a2bc sets the RAM buffer
+        // capacity to 251 and leaves the following halfword at zero. The
+        // length-update routine at 0x28140 updates software limits and the
+        // event duration separately.
         words[0x38 / 2] = 0xfb;
         words
     }
@@ -333,7 +345,18 @@ impl PacketTime {
     /// Pass the first CRC-valid data PDU timestamp for the connection event.
     #[must_use]
     pub fn data_anchor(self) -> Self {
-        self.shift_half_us(-RX_TIMESTAMP_DELAY_HALF_US)
+        self.data_anchor_for_phy(false)
+    }
+
+    /// Corrects the first valid data timestamp for the RX PHY of this event.
+    /// LE 2M receives the preamble and access address in 24 us, plus 6 us RX delay.
+    #[must_use]
+    pub fn data_anchor_for_phy(self, rx_two_m: bool) -> Self {
+        self.shift_half_us(if rx_two_m {
+            -60
+        } else {
+            -RX_TIMESTAMP_DELAY_HALF_US
+        })
     }
 
     fn shift_half_us(self, half_us: i64) -> Self {
@@ -346,6 +369,37 @@ impl PacketTime {
             fine_countdown: LAST_FINE_COUNT
                 - low_halfword(fine_elapsed.rem_euclid(HALF_US_PER_TICK)),
         }
+    }
+}
+
+/// Maximum data PDU fitting a direction's negotiated octets, time and current PHY.
+/// The link runs unencrypted. The scheduler reserves up to four extra MIC
+/// octets within the time bound, as the FR8029D ROM event allocator does.
+#[cfg(feature = "ble-gatt-dle")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DataAirtime {
+    octets: u8,
+    microseconds: u16,
+}
+
+#[cfg(feature = "ble-gatt-dle")]
+impl DataAirtime {
+    /// Computes the bound for LE 1M (one preamble octet) or LE 2M (two).
+    #[must_use]
+    pub fn new(octets: u16, time: u16, two_m: bool) -> Self {
+        let (overhead, us_per_octet) = if two_m { (11, 4) } else { (10, 8) };
+        let fits = (time / us_per_octet).saturating_sub(overhead);
+        let octets = octets.min(fits).min(251);
+        Self {
+            octets: octets.to_le_bytes()[0],
+            microseconds: time.min((octets + overhead + 4) * us_per_octet),
+        }
+    }
+
+    /// Maximum data payload octets on this PHY.
+    #[must_use]
+    pub const fn octets(self) -> u8 {
+        self.octets
     }
 }
 
@@ -381,6 +435,18 @@ impl ConnectionEvent {
             start: self
                 .start
                 .shift_half_us(i64::from(interval) * HALF_US_PER_CONN_UNIT),
+            ..self
+        }
+    }
+
+    /// Replaces the two legacy 328 us data PDUs in the slot reservation.
+    /// The anchor-listen window and inter-frame turnaround remain unchanged.
+    #[cfg(feature = "ble-gatt-dle")]
+    #[must_use]
+    pub fn with_data_airtime(self, rx: DataAirtime, tx: DataAirtime) -> Self {
+        Self {
+            duration_half_us: self.duration_half_us
+                + 2 * (i64::from(rx.microseconds) + i64::from(tx.microseconds) - 2 * 328),
             ..self
         }
     }
@@ -421,4 +487,21 @@ fn receive_window_word(half_us: i64) -> u16 {
 fn low_halfword(value: i64) -> u16 {
     let [lo, hi, ..] = value.to_le_bytes();
     u16::from_le_bytes([lo, hi])
+}
+
+#[cfg(all(test, feature = "ble-gatt-mac-probe", not(feature = "ble-gatt-xip")))]
+mod mac_probe_tests {
+    use super::{ConnectionEvent, PacketTime};
+
+    #[test]
+    fn mac_probe_listens_around_the_expected_next_anchor() {
+        let anchor = PacketTime {
+            coarse: 1024,
+            fine_countdown: PacketTime::FINE_AT_BOUNDARY,
+        };
+        let event = ConnectionEvent::open_window(anchor, 60_000, 0, 1);
+        // At 30 ms with 750 ppm combined drift, the 1.024 ms guard on
+        // each side and the 14 us tail require 1054 two-microsecond units.
+        assert_eq!(event.receive_window, 1054);
+    }
 }

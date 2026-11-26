@@ -97,6 +97,58 @@ impl<B: LinkBackend> HciState<B> {
         }
         Ok(())
     }
+    #[cfg(feature = "data-length")]
+    fn data_length_command(
+        &mut self,
+        opcode: u16,
+        p: &[u8],
+    ) -> Result<CommandReply, cmd::Error<HciError<B::Error>>> {
+        use crate::DataLength;
+        match opcode {
+            0x2022 => {
+                length(p, 6)?;
+                let handle = word(p, 0);
+                if self
+                    .core
+                    .connection()
+                    .is_none_or(|id| id.handle() != handle)
+                {
+                    return Err(Status::UNKNOWN_CONN_IDENTIFIER.into());
+                }
+                let (octets, time) = (word(p, 2), word(p, 4));
+                if !DataLength::valid_pair(octets, time) {
+                    return Err(Status::INVALID_HCI_PARAMETERS.into());
+                }
+                Self::core_result(self.core.set_tx_length(octets, time))?;
+                Ok(CommandReply::new(&handle.to_le_bytes()))
+            }
+            0x2023 => {
+                length(p, 0)?;
+                let suggested = self.core.suggested_length.unwrap_or(DataLength::LEGACY);
+                let [octets_lo, octets_hi] = suggested.tx_octets.to_le_bytes();
+                let [time_lo, time_hi] = suggested.tx_time.to_le_bytes();
+                Ok(CommandReply::new(&[octets_lo, octets_hi, time_lo, time_hi]))
+            }
+            0x2024 => {
+                length(p, 4)?;
+                let (octets, time) = (word(p, 0), word(p, 2));
+                if !DataLength::valid_pair(octets, time) {
+                    return Err(Status::INVALID_HCI_PARAMETERS.into());
+                }
+                self.core.suggested_length = Some(DataLength {
+                    tx_octets: octets,
+                    tx_time: time,
+                    ..DataLength::MAX
+                });
+                Ok(CommandReply::new(&[]))
+            }
+            _ => {
+                length(p, 0)?;
+                // The supported TX and RX maxima are symmetric.
+                Ok(CommandReply::new(&DataLength::MAX.control(0)[1..]))
+            }
+        }
+    }
     #[allow(
         clippy::inline_always,
         reason = "Specialize fixed HCI opcodes without retaining the universal command frame"
@@ -133,11 +185,20 @@ impl<B: LinkBackend> HciState<B> {
             }
             0x2002 => {
                 length(p, 0)?;
-                return Ok(CommandReply::new(&[27, 0, 4]));
+                let length = if self.core.supports_data_length() {
+                    251
+                } else {
+                    27
+                };
+                return Ok(CommandReply::new(&[length, 0, 4]));
             }
             0x2003 => {
                 length(p, 0)?;
-                return Ok(CommandReply::new(&[0; 8]));
+                return Ok(CommandReply::new(&self.core.le_features()));
+            }
+            #[cfg(feature = "data-length")]
+            0x2022..=0x2024 | 0x202f if self.core.supports_data_length() => {
+                return self.data_length_command(opcode, p);
             }
             0x200f => {
                 length(p, 0)?;

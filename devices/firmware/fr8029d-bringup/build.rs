@@ -35,6 +35,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         let advertising_in_sram =
             !gatt_xip && (connect_probe || env::var_os("CARGO_FEATURE_BLE_ADV_COLD_XIP").is_none());
         if gatt_board {
+            if env::var_os("CARGO_FEATURE_BLE_GATT_DLE").is_some() {
+                println!("cargo:rustc-link-arg-bin=fr8029d-ble-adv=--defsym=__gatt_dle=1");
+            }
             println!("cargo:rustc-link-arg-bin=fr8029d-ble-adv=--defsym=__gatt_board_probe=1");
             if env::var_os("CARGO_FEATURE_BLE_GATT_EVENT_DRIVEN").is_some() {
                 println!("cargo:rustc-link-arg-bin=fr8029d-ble-adv=--defsym=__gatt_event_wake=1");

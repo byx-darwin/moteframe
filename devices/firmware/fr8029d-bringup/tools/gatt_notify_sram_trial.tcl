@@ -3,15 +3,17 @@
 # Pass 2 as the third argument to observe a write/Notify after reconnect too.
 
 proc notify_core_check {} {
+    set vectors [read_memory 0x10002000 32 2]
     if {[read_memory 0xe000ed00 32 1] != 0x410fd210 ||
-        [read_memory 0x10002000 32 2] ne {0x2000b058 0x10002121}} {
-        error "Unexpected FR8029D board or stock reset vectors"
+        ($vectors ne {0x2000b058 0x10002121} && $vectors ne {0x20004440 0x100041a9})} {
+        error "Unexpected FR8029D board or resident reset vectors"
     }
+    return [expr {[lindex $vectors 1] & ~1}]
 }
 
 proc notify_sram_check {address size} {
     if {$size <= 0 || $address % 4 || $size % 4 ||
-        $address < 0x20003000 || $address + $size > 0x20018000} {
+        $address < 0x20001a00 || $address + $size > 0x20018000} {
         error "Write would leave the FR8029D application SRAM window"
     }
 }
@@ -53,6 +55,14 @@ proc notify_report_wake {} {
     echo "WAKE_STATS RADIO_IRQ=$radio TIMER_IRQ=$timer WAIT_ATTEMPTS=$waits MIN_LEAD_TICKS=$lead"
 }
 
+proc notify_report_connect {} {
+    set counts [read_memory [expr {$::notify_diag + 16 * 4}] 32 2]
+    set rejected [read_memory [expr {$::notify_diag + 36 * 4}] 32 3]
+    lassign $counts scan accepted
+    lassign $rejected status decode reason
+    echo "CONNECT_RX SCAN_REQ=$scan ACCEPTED=$accepted STATUS_REJECTS=$status DECODE_REJECTS=$decode LAST_REJECTION=$reason"
+}
+
 proc notify_wait_advertising {} {
     for {set i 0} {$i < 60} {incr i} {
         set diag [notify_diag]
@@ -86,61 +96,51 @@ proc notify_check_scheduler {} {
     }
 }
 
+proc notify_ack_after {previous} {
+    set token_address [expr {$::notify_diag + 62 * 4}]
+    set token [lindex [read_memory $token_address 32 1] 0]
+    if {$token <= $previous} {return {}}
+    set ack [read_memory [expr {$::notify_diag + 33 * 4}] 32 3]
+    if {$token != [lindex [read_memory $token_address 32 1] 0]} {return {}}
+    return [linsert $ack 0 $token]
+}
+
 proc notify_wait_for_tx {seconds {sessions 1}} {
     set last {}
     set deadline [expr {[clock seconds] + $seconds}]
-    set observed 0
-    set abandoned 0
-    set disconnects 0
     set confirmed 0
     set last_write 0
-    set last_disconnect -1
+    set last_session 0
+    set last_token 0
     while {[clock seconds] < $deadline} {
         set d [notify_diag]
         set phase [lindex $d 0]
-        set outstanding [expr {[lindex $d 9] - [lindex $d 10]}]
-        if {[lindex $d 5] != $disconnects} {
-            set disconnects [lindex $d 5]
-            set observed 0
-        }
-        if {$phase == 2} {
-            # Counters are cumulative. A disconnected link can leave unacked
-            # sends in the history even after its queue has been discarded.
-            set abandoned $outstanding
-        }
         set key [list $phase [lindex $d 1] [lindex $d 13] [lindex $d 14]]
         if {$key ne $last} {
             echo "NOTIFY_DIAG $d"
             if {$last ne {} && [lindex $key 3] != [lindex $last 3]} {
-                echo "ATT_TX [read_memory 0x40011984 8 15]"
+                echo "ATT_TX [read_memory 0x40011984 8 27]"
             }
             set last $key
         }
         if {$phase & 0x80000000} {error "GATT stopped with diagnostics $d"}
-        if {$phase == 4 && !$observed && [lindex $d 1] > $last_write &&
-            $disconnects > $last_disconnect && [lindex $d 4] == 9 && [lindex $d 16] == 27} {
-            set expected {0xb 0x0 0x4 0x0 0x1b 0x9 0x0}
-            foreach word [lrange $d 2 3] {
-                for {set shift 0} {$shift < 32} {incr shift 8} {
-                    lappend expected [format 0x%x [expr {($word >> $shift) & 0xff}]]
-                }
+        if {[lindex $d 1] > $last_write && [lindex $d 4] == 9} {
+            set ack [notify_ack_after $last_token]
+            lassign $ack token session low high
+            if {[llength $ack] == 4 && $session > $last_session &&
+                $low == [lindex $d 2] && $high == [lindex $d 3]} {
+                set rates [expr {[lindex [read_memory 0x400101ea 16 1] 0] & 15}]
+                echo "NOTIFY_ACK SESSION=$session TOKEN=$token VALUE_PREFIX_WORDS=$low,$high PHY_RATES=$rates"
+                incr confirmed
+                if {$confirmed == $sessions} {return}
+                set last_write [lindex $d 1]
+                set last_session $session
+                set last_token $token
             }
-            if {[read_memory 0x40011984 8 15] eq $expected} {
-                echo "PHONE_NOTIFICATION_VERIFIED $expected"
-                set observed 1
-            }
-        }
-        if {$observed && $outstanding == $abandoned} {
-            echo "TX_QUEUE_CONFIRMED $d"
-            incr confirmed
-            if {$confirmed == $sessions} {return}
-            set last_write [lindex $d 1]
-            set last_disconnect $disconnects
-            set observed 0
         }
         sleep 10
     }
-    error "Timed out waiting for expected ATT Handle Value Notification and TX completion"
+    error "Timed out waiting for the expected Handle Value Notification ACK"
 }
 
 proc notify_reset_stock {} {
@@ -169,7 +169,7 @@ proc run_notify_trial {seconds {prefix_path {}} {sessions 1}} {
         error "Provide a positive trial duration in seconds"
     }
     if {$sessions ni {1 2}} {error "Provide one or two expected sessions"}
-    notify_core_check
+    set reset_entry [notify_core_check]
     if {[read_memory 0xe000ed08 32 1] != 0x10002000} {
         error "Expected starting firmware to be stock"
     }
@@ -185,15 +185,15 @@ proc run_notify_trial {seconds {prefix_path {}} {sessions 1}} {
     set resumed 0
     set status [catch {
         halt 2000
-        bp 0x10002120 2 hw
+        bp $reset_entry 2 hw
         set breakpoint_installed 1
         reset run
         wait_halt 10000
-        if {[dict get [get_reg -force {pc}] pc] != 0x10002120 ||
+        if {[dict get [get_reg -force {pc}] pc] != $reset_entry ||
             [read_memory 0x40000004 32 1] != 0} {
             error "Expected reset halt before stock FR8029D radio initialization"
         }
-        rbp 0x10002120
+        rbp $reset_entry
         set breakpoint_installed 0
 
         set msp_top 0
@@ -215,6 +215,9 @@ proc run_notify_trial {seconds {prefix_path {}} {sessions 1}} {
         set resumed 1
 
         notify_wait_advertising
+        if {[lindex [read_memory [expr {$::notify_diag + 63 * 4}] 32 1] 0] != 1} {
+            error "Unsupported diagnostic layout; rebuild and pack the SRAM image from this checkout"
+        }
         notify_check_scheduler
         notify_wait_for_tx $seconds $sessions
         if {$sessions == 1} {
@@ -229,6 +232,7 @@ proc run_notify_trial {seconds {prefix_path {}} {sessions 1}} {
         set sample_failure [catch {
             halt 1500
             echo "NOTIFY_FINAL [notify_diag]"
+            notify_report_connect
             notify_report_wake
             foreach stack $::notify_stacks {
                 lassign $stack label base size paint
@@ -245,7 +249,7 @@ proc run_notify_trial {seconds {prefix_path {}} {sessions 1}} {
         }
     }
     if {$status} {
-        if {$breakpoint_installed} {catch {rbp 0x10002120}}
+        if {$breakpoint_installed} {catch {rbp $reset_entry}}
         catch {halt 1000}
         catch {echo "NOTIFY_FAILURE_REGS [get_reg -force {pc msp psp xPSR primask}]"}
         catch {echo "NOTIFY_FAILURE_DIAG [read_memory $::notify_diag 32 64]"}

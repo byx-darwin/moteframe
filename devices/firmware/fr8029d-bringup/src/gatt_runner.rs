@@ -1,7 +1,7 @@
 //! Foreground peripheral application over an independently supplied radio backend.
 
 use crate::gatt::{
-    ATTRIBUTE_COUNT, CommittedWrites, GattError, GattProfile, GattProgress, VALUE_LEN,
+    ATTRIBUTE_COUNT, CommittedWrites, GattError, GattProfile, GattProgress, Notification, VALUE_LEN,
 };
 use ble_controller::{
     AdvertisingData, Controller, ControllerError, HciController, HciError, LinkBackend,
@@ -9,10 +9,10 @@ use ble_controller::{
 };
 pub use ble_host_trouble::Resources;
 use ble_host_trouble::{
-    build,
+    HostPacketPool as DefaultPacketPool, build,
     host::prelude::{
         Advertisement, AdvertisementParameters, AttributeServer, AttributeTable, BleHostError,
-        DefaultPacketPool, Error, GAP_SERVICE_ATTRIBUTE_COUNT, GapConfig, Stack,
+        ConnectionEvent, Error, GAP_SERVICE_ATTRIBUTE_COUNT, GapConfig, Stack,
     },
     poll_host_runners,
 };
@@ -57,7 +57,9 @@ impl fmt::Debug for GattIdentity {
 pub struct CommittedValue {
     /// Original attribute handle carried by the write.
     pub handle: u16,
-    /// Bytes accepted by the GATT server.
+    /// Number of valid bytes at the start of the buffer.
+    pub length: usize,
+    /// Storage for the value, zero-padded after the accepted bytes.
     pub bytes: [u8; VALUE_LEN],
 }
 
@@ -65,7 +67,7 @@ impl fmt::Debug for CommittedValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("CommittedValue")
             .field("handle", &self.handle)
-            .field("length", &self.bytes.len())
+            .field("length", &self.length)
             .finish_non_exhaustive()
     }
 }
@@ -115,12 +117,25 @@ pub fn run<B: LinkBackend, F: FnMut(GattReport)>(
     identity: GattIdentity,
     report: F,
 ) -> impl Future<Output = GattRunError<B::Error>> {
-    let hci = HciController::new(Controller::new(backend, identity.version));
-    run_hci::<false, _, _, _>(hci, resources, identity, report, || Ok(()))
+    #[cfg(feature = "ble-gatt-dle")]
+    {
+        // Borrow the endpoint so moving the Host does not copy long-packet queues
+        // into another future on the BLE task stack.
+        async move {
+            let hci = HciController::new(Controller::new(backend, identity.version));
+            run_hci::<false, _, _, _>(hci.borrowed(), resources, identity, report, || Ok(())).await
+        }
+    }
+    #[cfg(not(feature = "ble-gatt-dle"))]
+    {
+        let hci = HciController::new(Controller::new(backend, identity.version));
+        run_hci::<false, _, _, _>(hci, resources, identity, report, || Ok(()))
+    }
 }
 
 /// Runs the same GATT application with owner-driven radio service.
-/// The caller polls on IRQ, timer and software wakes on one executor.
+/// The board advances the radio on IRQ, timer and software wakes, including
+/// while the Host receive lane is blocked.
 #[cfg(feature = "ble-gatt-event-driven")]
 pub async fn run_event_driven<B: LinkBackend, F: FnMut(GattReport)>(
     backend: B,
@@ -226,11 +241,23 @@ where
         .map_err(GattRunError::Gap)?;
     let profile = GattProfile::add(&mut table, &mut storage).map_err(|_| GattRunError::Profile)?;
     let server = AttributeServer::<_, DefaultPacketPool, ATTRIBUTES, 1>::new(table);
+    let mut parameters = AdvertisementParameters::default();
+    if cfg!(all(
+        feature = "ble-gatt-mac-probe",
+        not(feature = "ble-gatt-xip")
+    )) {
+        // Increase the chances of overlapping the Mac's initiator scan window.
+        let interval = core::time::Duration::from_millis(30)
+            .try_into()
+            .map_err(|_| GattRunError::Profile)?;
+        parameters.interval_min = interval;
+        parameters.interval_max = interval;
+    }
     let mut peripheral = stack.peripheral();
     loop {
         let acceptor = peripheral
             .advertise(
-                &AdvertisementParameters::default(),
+                &parameters,
                 Advertisement::ConnectableScannableUndirected {
                     adv_data: identity.advertising_data,
                     scan_data: &[],
@@ -246,31 +273,38 @@ where
             .map_err(|error| GattRunError::Host(BleHostError::BleHost(error)))?;
         report(GattReport::Connected);
         let mut writes = CommittedWrites::new();
-        loop {
-            match profile
-                .handle(connection.next().await, &mut writes)
-                .await
-                .map_err(GattRunError::Gatt)?
-            {
-                GattProgress::Continue => {}
-                GattProgress::Committed => {
-                    let mut bytes = [0; VALUE_LEN];
+        let out_of_memory = loop {
+            let mut bytes = [0; VALUE_LEN];
+            let notification = match profile.handle(connection.next().await, &mut writes).await {
+                Err(GattError::Host(Error::OutOfMemory)) => break true,
+                Err(error) => return Err(GattRunError::Gatt(error)),
+                Ok(GattProgress::Continue) => continue,
+                Ok(GattProgress::SdkSubscribed) => Notification::SdkSubscription,
+                Ok(GattProgress::Committed) => {
                     let meta = writes
                         .take_into(&mut bytes)
                         .map_err(GattRunError::WriteDelivery)?
-                        .filter(|meta| meta.length == VALUE_LEN)
                         .ok_or(GattRunError::MissingWrite)?;
                     report(GattReport::Committed(CommittedValue {
                         handle: meta.target,
+                        length: meta.length,
                         bytes,
                     }));
-                    profile
-                        .echo(&connection, &bytes)
-                        .await
-                        .map_err(GattRunError::Gatt)?;
+                    Notification::Echo(&bytes[..meta.length])
                 }
-                GattProgress::Disconnected => break,
+                Ok(GattProgress::Disconnected) => break false,
+            };
+            match profile.notify(&connection, notification).await {
+                Err(GattError::Host(Error::OutOfMemory)) => break true,
+                Err(error) => return Err(GattRunError::Gatt(error)),
+                Ok(()) => {}
             }
+        };
+        if out_of_memory {
+            // A write may already have been accepted. Do not replay it.
+            let link = connection.raw();
+            link.disconnect();
+            while !matches!(link.next().await, ConnectionEvent::Disconnected { .. }) {}
         }
         report(GattReport::Disconnected);
     }

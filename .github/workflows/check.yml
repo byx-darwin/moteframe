@@ -25,7 +25,16 @@ jobs:
         run: |
           cargo test --locked --manifest-path devices/firmware/fr8029d-bringup/Cargo.toml --features ble-gatt-probe
           cargo build --locked --release --manifest-path devices/firmware/fr8029d-bringup/Cargo.toml --target thumbv8m.main-none-eabi --features ble-gatt-board --bin fr8029d-ble-adv
+      - name: Check optional data length and the SDK GATT profile
+        run: |
+          cargo test --locked --manifest-path devices/Cargo.toml --workspace --all-features
+          cargo test --locked --manifest-path devices/firmware/fr8029d-bringup/Cargo.toml --features ble-gatt-dle
+          cargo test --locked --manifest-path devices/firmware/fr8029d-bringup/Cargo.toml --features ble-gatt-dle,ble-gatt-event-driven
+          cargo build --locked --release --manifest-path devices/firmware/fr8029d-bringup/Cargo.toml --target thumbv8m.main-none-eabi --features ble-gatt-xip,ble-gatt-event-driven,ble-gatt-dle --bin fr8029d-ble-adv
+          cargo build --locked --release --manifest-path devices/firmware/fr8029d-bringup/Cargo.toml --target thumbv8m.main-none-eabi --features ble-gatt-xip,ble-gatt-dle --bin fr8029d-ble-adv
       - name: Check FR8029D FreeRTOS build
         run: |
           git clone --depth 1 --branch V11.2.0 https://github.com/FreeRTOS/FreeRTOS-Kernel.git devices/target/fr8029d-freertos/kernel
           cargo build --locked --release --manifest-path devices/firmware/fr8029d-bringup/Cargo.toml --target thumbv8m.main-none-eabi --features ble-gatt-freertos,ble-gatt-xip --bin fr8029d-ble-adv
+          cargo build --locked --release --manifest-path devices/firmware/fr8029d-bringup/Cargo.toml --target thumbv8m.main-none-eabi --features ble-gatt-freertos,ble-gatt-xip,ble-gatt-event-driven,ble-gatt-dle --bin fr8029d-ble-adv
+          cargo build --locked --release --manifest-path devices/firmware/fr8029d-bringup/Cargo.toml --target thumbv8m.main-none-eabi --features ble-gatt-freertos,ble-gatt-xip,ble-gatt-dle --bin fr8029d-ble-adv

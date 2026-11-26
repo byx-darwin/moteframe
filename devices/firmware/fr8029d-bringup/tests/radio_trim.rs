@@ -37,3 +37,25 @@ fn rejects_erased_or_damaged_records() {
     bytes[0x5c] ^= 1;
     assert_eq!(RadioTrim::parse(&bytes), Err(TrimError::Checksum));
 }
+
+#[test]
+fn expands_a_single_tx_measurement_into_both_eight_band_tables() -> Result<(), TrimError> {
+    let mut trim = RadioTrim::parse(&trim_record())?;
+    trim.tx_modulation_scale = 0x0cc1;
+    trim.kvco = 7;
+    assert_eq!(trim.tx_kvco_fields(), 0x77);
+    assert_eq!(
+        trim.tx_modulation_bands().collect::<Vec<_>>(),
+        [
+            (0x06df, 0x0d89),
+            (0x06a1, 0x0d0e),
+            (0x0692, 0x0cf1),
+            (0x0679, 0x0cc1),
+            (0x0677, 0x0cbd),
+            (0x0663, 0x0c94),
+            (0x064c, 0x0c69),
+            (0x0627, 0x0c1e),
+        ]
+    );
+    Ok(())
+}

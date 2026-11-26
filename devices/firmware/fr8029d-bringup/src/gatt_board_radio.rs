@@ -1,44 +1,83 @@
-//! FR8029D legacy 1M transport for the existing Rust Host.
+//! FR8029D legacy advertising and connected LE 1M/2M transport.
 
 use super::{
     CLOCK_MASK, PACKET_RAM, SLOT_LEAD_TICKS, clock,
     connect_probe::Receiver,
     connect_radio::{
-        CONNECTED_RX_ERRORS, CONNECTION_CONTROL, LINK_ID, TX_DONE, prepare_link, read_end, submit,
-        submit_link, wait_connection_event,
+        CONNECTED_RX_ERRORS, CONNECTION_CONTROL, EVENT_COMPLETION_TIMEOUT, LINK_ID, TX_DONE,
+        prepare_link, read_end, submit, submit_link, wait_connection_event,
     },
     diagnostic, increment, write_record, write8,
 };
+#[cfg(test)]
+use super::{test_halfword as halfword, test_set_halfword as set_halfword};
 use ble_controller::{
     Advertisement, ConnectionParameters, FrameKind, LinkBackend, LinkEvent, LinkFrame, OwnedQueue,
     Peer, TxAdmission,
 };
-use core::{
-    ptr::{read_volatile, write_volatile},
-    sync::atomic::{Ordering, fence},
-};
+#[cfg(not(test))]
+use core::ptr::{read_volatile, write_volatile};
+use core::sync::atomic::{Ordering, fence};
 use fr8029d_bringup::{
     advertising::{
         CONTROL_OFFSET, RX_COUNT, SCAN_TX_OFFSET, TX_OFFSET, TX_PAYLOAD_OFFSET, advance_clock,
         advertising_slot, connectable_control,
     },
     connection::{ConnectionEvent, ConnectionRequest, ConnectionUpdate, PacketTime},
+    phy::LinkPhy,
     wake::SlotWatchdog,
 };
 #[cfg(feature = "ble-gatt-event-driven")]
 use {super::gatt_board_wake, fr8029d_bringup::wake::RadioDeadline};
 
+#[cfg(feature = "ble-gatt-dle")]
+use {
+    super::connect_probe::RxBuffer, ble_controller::DataLength, core::sync::atomic::AtomicU32,
+    fr8029d_bringup::connection::DataAirtime,
+};
+
+// SWD bench words for one session: effective TX/RX octets, TX/RX times,
+// largest new RX descriptor, largest committed and largest ACKed TX lengths.
+#[cfg(feature = "ble-gatt-dle")]
+#[unsafe(no_mangle)]
+static FR29_DLE_OBSERVATIONS: [AtomicU32; 5] = [const { AtomicU32::new(0) }; 5];
+
+#[cfg(feature = "ble-gatt-dle")]
+fn record_limits(limits: DataLength) {
+    let pair = |tx, rx| u32::from(tx) | u32::from(rx) << 16;
+    FR29_DLE_OBSERVATIONS[0].store(pair(limits.tx_octets, limits.rx_octets), Ordering::Relaxed);
+    FR29_DLE_OBSERVATIONS[1].store(pair(limits.tx_time, limits.rx_time), Ordering::Relaxed);
+}
+
+#[cfg(feature = "ble-gatt-dle")]
+#[derive(Debug)]
+enum BoardEvent {
+    Connected(Peer, ConnectionParameters),
+    Received(FrameKind, u8, RxBuffer, u32),
+    Acknowledged(u32),
+    Disconnected(u8),
+    ParametersUpdated(ConnectionParameters),
+    PhyUpdated(u8, u8),
+}
+
+#[cfg(not(feature = "ble-gatt-dle"))]
+use ble_controller::LinkEvent as BoardEvent;
+
+pub(super) const ADAPTIVE_PHY: bool = !cfg!(feature = "ble-gatt-1m-only");
 const HALF_CLOCK: u32 = CLOCK_MASK.div_ceil(2);
 const CONTROL: usize = PACKET_RAM + CONNECTION_CONTROL as usize;
 const TX_HEAD_REGISTER: usize = CONTROL + 0x24;
 const LEGACY_ADV_LEN: usize = 14;
-// The mobile scanner must discover the new GATT table and its added CCCD.
+const NOTIFY_ACK_SESSION: usize = 33;
+const NOTIFY_ACK_LOW: usize = 34;
+const NOTIFY_ACK_HIGH: usize = 35;
+// Use a fresh probe identity for the GATT database revision that adds FFF0.
 const ADDRESS_SUFFIX: u8 = if cfg!(feature = "ble-gatt-freertos") {
-    0xa2
+    0xc2
 } else if cfg!(feature = "ble-gatt-xip") {
-    0xa1
+    0xc1
 } else {
-    0xa0
+    0xc0
 };
 pub(super) const GATT_ADDRESS: [u8; 6] = [ADDRESS_SUFFIX, 0x80, 0x29, 0x01, 0x25, 0xc3];
 
@@ -52,6 +91,247 @@ const ATT_TX: usize = 54;
 const LAST_ATT_RX: usize = 55;
 const LAST_ATT_TX: usize = 56;
 const RADIO_TIMEOUTS: usize = 61;
+const NOTIFY_ACK_TOKEN: usize = 62;
+const RX_REPEATED: u16 = 0x0040;
+
+fn received_pdu(status: u16, header: u16) -> Option<(FrameKind, bool)> {
+    // Repeated packets still carry the central's event timestamp. Exclude
+    // the payload separately so it is never delivered twice to the Host.
+    if status & (CONNECTED_RX_ERRORS & !RX_REPEATED) != 0 {
+        return None;
+    }
+    let kind = match header & 3 {
+        1 => FrameKind::Continuation,
+        2 => FrameKind::Start,
+        3 => FrameKind::Control,
+        _ => return None,
+    };
+    Some((kind, status & RX_REPEATED == 0))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{FrameKind, received_pdu};
+
+    #[cfg(all(feature = "ble-gatt-dle", not(target_arch = "arm")))]
+    fn advance_three_slots_with_full_ring(radio: &mut super::Radio) -> Result<(), u32> {
+        use super::super::{COMPLETED_SLOT, EVENT_CLOCK, SUBMITTED_SLOTS};
+        use super::*;
+        radio.initialized = true;
+        for _ in 0..3 {
+            let link = radio.link.as_ref().ok_or(21_u32)?;
+            let counter = link.counter;
+            let start = link.event.start.coarse;
+            EVENT_CLOCK.set(Some(start.wrapping_sub(3) & CLOCK_MASK));
+            let previous = SUBMITTED_SLOTS.get();
+            radio.service_backpressure()?;
+            assert_eq!(SUBMITTED_SLOTS.get(), previous + 1);
+            assert!(radio.pending.is_some());
+            COMPLETED_SLOT.set(Some(radio.slot));
+            EVENT_CLOCK.set(Some(start));
+            radio.service_backpressure()?;
+            assert!(radio.pending.is_none());
+            assert_eq!(radio.link.as_ref().ok_or(21_u32)?.counter, counter + 1);
+            assert_eq!(radio.events.len(), RX_COUNT);
+        }
+        EVENT_CLOCK.set(None);
+        Ok(())
+    }
+
+    #[cfg(feature = "ble-gatt-dle")]
+    fn connected_fixture() -> Result<super::Radio, u32> {
+        use super::*;
+        let mut radio = Radio::new();
+        radio.receiver = Some(Receiver::start());
+        let request = ConnectionRequest {
+            initiator: [1; 6],
+            initiator_random: true,
+            access_address: 0x1234_5678,
+            crc_init: 0x00ab_cdef,
+            window_size: 1,
+            window_offset: 0,
+            interval: 24,
+            latency: 0,
+            supervision_timeout: 500,
+            channel_map: [255, 255, 255, 255, 31],
+            hop: 8,
+            sca: 7,
+        };
+        radio.link = Some(Link::start(
+            request,
+            PacketTime {
+                coarse: 0,
+                fine_countdown: 624,
+            },
+        )?);
+        Ok(radio)
+    }
+
+    #[cfg(feature = "ble-gatt-dle")]
+    #[test]
+    fn supervision_timeout_retires_held_descriptors_before_new_session() -> Result<(), u32> {
+        use super::*;
+        use fr8029d_bringup::advertising::RX_OFFSET;
+        let mut radio = connected_fixture()?;
+        let rx = PACKET_RAM + usize::from(RX_OFFSET);
+        set_halfword(rx + 4, u16::from_le_bytes([2, 4]));
+        set_halfword(rx + 0xc, u16::from(LINK_ID) << 11);
+        set_halfword(rx, halfword(rx) | 0x8000);
+        radio.connection_ended(0)?;
+        assert!(matches!(radio.poll(), Ok(Some(LinkEvent::Connected(..)))));
+        assert_eq!(radio.events.len(), 1);
+        radio.expire_link(32 * 501)?;
+        let frame = LinkFrame::new(FrameKind::Start, &[0, 0, 4, 0]).map_err(|_| 20_u32)?;
+        assert_eq!(radio.transmit(1, frame), Ok(TxAdmission::Busy));
+        assert_eq!(radio.poll(), Ok(Some(LinkEvent::Disconnected(0x08))));
+        assert!(radio.events.is_empty());
+        let mut receiver = Receiver::start();
+        assert!(receiver.take_link()?.is_none());
+        Ok(())
+    }
+
+    #[cfg(feature = "ble-gatt-dle")]
+    #[test]
+    fn full_rx_ring_and_single_tx_descriptor_preserve_every_byte_until_consumed() -> Result<(), u32>
+    {
+        use super::*;
+        use fr8029d_bringup::advertising::{RX_OFFSET, RX_WORDS};
+        let mut radio = connected_fixture()?;
+        let descriptor = |i: usize| PACKET_RAM + usize::from(RX_OFFSET) + i * RX_WORDS * 2;
+        let payload = core::array::from_fn::<_, 251, _>(|i| i.to_le_bytes()[0] ^ 0xab);
+        let lengths = [27, 28, 250, 251, 28, 251];
+        for (i, len) in lengths.into_iter().enumerate() {
+            let rx = descriptor(i);
+            let offset = usize::from(halfword(rx + 0x14));
+            for (j, byte) in payload[..len].iter().copied().enumerate() {
+                write8(PACKET_RAM + offset + j, byte);
+            }
+            set_halfword(rx + 4, u16::from_le_bytes([2, len.to_le_bytes()[0]]));
+            set_halfword(rx + 0xc, (u16::from(LINK_ID) << 11) | 0x0190);
+            set_halfword(rx, halfword(rx) | 0x8000);
+        }
+        radio.connection_ended(0)?;
+        assert!(matches!(radio.poll(), Ok(Some(LinkEvent::Connected(..)))));
+        // Simulate another connection event before the Host consumes any ACL.
+        // The six completed descriptors remain CPU-owned across that event.
+        #[cfg(not(target_arch = "arm"))]
+        advance_three_slots_with_full_ring(&mut radio)?;
+        // The first short packet can be delivered before a length update; the
+        // controller may change the limits between observations of the same event.
+        for (i, len) in lengths.into_iter().enumerate() {
+            if i == 1 {
+                radio.data_length_updated(DataLength::MAX);
+            }
+            assert_ne!(halfword(descriptor(i)) & 0x8000, 0);
+            let Some(LinkEvent::Received(frame)) = radio.poll()? else {
+                panic!("missing RX frame")
+            };
+            assert_eq!(frame.payload(), &payload[..len]);
+            assert_eq!(halfword(descriptor(i)) & 0x8000, 0);
+        }
+
+        let frame = LinkFrame::new(FrameKind::Start, &payload).map_err(|_| 20_u32)?;
+        assert_eq!(
+            radio.transmit_payload(5, frame.kind(), false, frame.payload()),
+            Ok(TxAdmission::Committed)
+        );
+        let other = LinkFrame::new(FrameKind::Start, &[99; 28]).map_err(|_| 20_u32)?;
+        assert_eq!(radio.transmit(6, other), Ok(TxAdmission::Busy));
+        let tx = PACKET_RAM + usize::from(TX_OFFSET);
+        assert_eq!(halfword(tx + 2), 0xfb02);
+        for (i, byte) in payload.iter().copied().enumerate() {
+            assert_eq!(
+                super::super::read8(PACKET_RAM + usize::from(TX_PAYLOAD_OFFSET) + i),
+                byte
+            );
+        }
+        radio.connection_ended(0)?;
+        assert!(radio.events.is_empty());
+        radio.data_length_updated(DataLength::LEGACY);
+        let link = radio.link.as_ref().ok_or(21_u32)?;
+        assert_eq!(link.tx_airtime().octets(), 27);
+        assert_eq!(link.slot_tx_airtime().octets(), 251);
+        radio.data_length_updated(DataLength::MAX);
+        set_halfword(tx, halfword(tx) | TX_DONE);
+        radio.connection_ended(0)?;
+        assert_eq!(radio.poll(), Ok(Some(LinkEvent::Acknowledged(5))));
+        assert_eq!(FR29_DLE_OBSERVATIONS[4].load(Ordering::Relaxed), 251);
+
+        // A repeat updates timing but returns its slot immediately. The second
+        // descriptor in this event is new and remains held until polled.
+        for i in 0..2 {
+            let rx = descriptor(i);
+            set_halfword(rx + 2, if i == 0 { RX_REPEATED } else { 0 });
+            set_halfword(rx + 4, 0xfb02);
+            set_halfword(rx, halfword(rx) | 0x8000);
+        }
+        radio.connection_ended(0)?;
+        assert_eq!(halfword(descriptor(0)) & 0x8000, 0);
+        assert_ne!(halfword(descriptor(1)) & 0x8000, 0);
+        assert_eq!(radio.events.len(), 1);
+        assert!(matches!(radio.poll(), Ok(Some(LinkEvent::Received(_)))));
+        assert_eq!(halfword(descriptor(1)) & 0x8000, 0);
+
+        radio.data_length_updated(DataLength::LEGACY);
+        assert_eq!(radio.transmit(7, other), Err(20));
+        radio.data_length_updated(DataLength::MAX);
+        let rx = descriptor(2);
+        set_halfword(rx + 4, 0xfc02);
+        set_halfword(rx, halfword(rx) | 0x8000);
+        radio.connection_ended(0)?;
+        assert_eq!(radio.poll(), Err(20));
+        assert_eq!(halfword(rx) & 0x8000, 0);
+        Ok(())
+    }
+
+    #[test]
+    fn notify_completion_follows_the_final_fragment() {
+        let mut remaining = 0;
+        let mut packet = [0u8; 27];
+        packet[..7].copy_from_slice(&[23, 0, 4, 0, 0x1b, 9, 0]);
+        assert!(!super::echo_fragment(
+            &mut remaining,
+            FrameKind::Start,
+            &packet[..15]
+        ));
+        assert!(!super::echo_fragment(
+            &mut remaining,
+            FrameKind::Control,
+            &[7, 0xff]
+        ));
+        assert!(super::echo_fragment(
+            &mut remaining,
+            FrameKind::Continuation,
+            &packet[15..]
+        ));
+        assert!(!super::echo_fragment(
+            &mut remaining,
+            FrameKind::Continuation,
+            &packet[15..]
+        ));
+        assert!(super::echo_fragment(
+            &mut remaining,
+            FrameKind::Start,
+            &packet
+        ));
+    }
+
+    #[test]
+    fn repeated_data_can_track_the_anchor_but_is_never_delivered_twice() {
+        assert_eq!(received_pdu(0x00, 0x0b02), Some((FrameKind::Start, true)));
+        assert_eq!(received_pdu(0xc0, 0x0b02), Some((FrameKind::Start, false)));
+        assert_eq!(received_pdu(0xc1, 0x0b02), None);
+    }
+}
+
+#[derive(Debug)]
+struct PendingTx {
+    token: u32,
+    offset: u16,
+    is_echo: bool,
+    #[cfg(feature = "ble-gatt-dle")]
+    len: u8,
+}
 
 #[derive(Debug)]
 struct Link {
@@ -62,7 +342,13 @@ struct Link {
     counter: u16,
     anchor: Option<PacketTime>,
     missed: u16,
-    tx: Option<(u32, usize)>,
+    tx: Option<PendingTx>,
+    echo_remaining: u8,
+    #[cfg(feature = "ble-gatt-dle")]
+    limits: DataLength,
+    #[cfg(feature = "ble-gatt-dle")]
+    tx_two_m: bool,
+    phy: LinkPhy,
     map_update: Option<(u16, [u8; 5])>,
     timing_update: Option<ConnectionUpdate>,
     reacquiring: bool,
@@ -79,6 +365,13 @@ impl Link {
         .map_err(|_| 20_u32)?;
         let event = request.first_event(request_time);
         prepare_link(request, event);
+        #[cfg(feature = "ble-gatt-dle")]
+        {
+            record_limits(DataLength::LEGACY);
+            for word in &FR29_DLE_OBSERVATIONS[2..] {
+                word.store(0, Ordering::Relaxed);
+            }
+        }
         Ok(Self {
             request,
             request_time,
@@ -88,6 +381,12 @@ impl Link {
             anchor: None,
             missed: 0,
             tx: None,
+            echo_remaining: 0,
+            #[cfg(feature = "ble-gatt-dle")]
+            limits: DataLength::LEGACY,
+            #[cfg(feature = "ble-gatt-dle")]
+            tx_two_m: false,
+            phy: LinkPhy::default(),
             map_update: None,
             timing_update: None,
             reacquiring: false,
@@ -147,6 +446,34 @@ impl Link {
         Ok(())
     }
 
+    #[cfg(feature = "ble-gatt-dle")]
+    fn tx_airtime(&self) -> DataAirtime {
+        DataAirtime::new(self.limits.tx_octets, self.limits.tx_time, self.tx_two_m)
+    }
+
+    #[cfg(feature = "ble-gatt-dle")]
+    fn slot_tx_airtime(&self) -> DataAirtime {
+        let limit = self.tx_airtime();
+        // A changed length or PHY does not return an outstanding descriptor.
+        // Reserve time for its existing payload until the peer ACKs it.
+        if let Some(tx) = &self.tx
+            && tx.len > limit.octets()
+        {
+            DataAirtime::new(u16::from(tx.len), u16::MAX, self.tx_two_m)
+        } else {
+            limit
+        }
+    }
+
+    #[cfg(feature = "ble-gatt-dle")]
+    fn rx_airtime(&self) -> DataAirtime {
+        DataAirtime::new(
+            self.limits.rx_octets,
+            self.limits.rx_time,
+            self.phy.rx_two_m(),
+        )
+    }
+
     fn expired(&self, now: u32) -> bool {
         if let Some(anchor) = self.anchor {
             let elapsed = now.wrapping_sub(anchor.coarse) & CLOCK_MASK;
@@ -187,7 +514,12 @@ pub(super) struct Radio {
     next_advertisement: u32,
     slot: u32,
     jitter: u32,
-    events: OwnedQueue<LinkEvent, 8>,
+    session: u32,
+    #[cfg(feature = "ble-gatt-dle")]
+    // Six held RX descriptors, plus connect, TX ACK, PHY and timing changes.
+    events: OwnedQueue<BoardEvent, { RX_COUNT + 4 }>,
+    #[cfg(not(feature = "ble-gatt-dle"))]
+    events: OwnedQueue<BoardEvent, 8>,
 }
 
 impl Radio {
@@ -201,6 +533,7 @@ impl Radio {
             next_advertisement: 0,
             slot: 0,
             jitter: 1,
+            session: 0,
             events: OwnedQueue::new(),
         }
     }
@@ -247,55 +580,202 @@ impl Radio {
         let link = self.link.as_mut().ok_or(21_u32)?;
         if link.parameters_changed {
             self.events
-                .push(LinkEvent::ParametersUpdated(link.parameters))
+                .push(BoardEvent::ParametersUpdated(link.parameters))
                 .map_err(|_| 22_u32)?;
             link.parameters_changed = false;
             increment(UPDATES_APPLIED);
         }
-        if let Some((token, descriptor)) = link.tx
-            && halfword(descriptor) & TX_DONE != 0
+        if let Some(tx) = &link.tx
+            && halfword(PACKET_RAM + usize::from(tx.offset)) & TX_DONE != 0
         {
             self.events
-                .push(LinkEvent::Acknowledged(token))
+                .push(BoardEvent::Acknowledged(tx.token))
                 .map_err(|_| 22_u32)?;
+            if tx.is_echo {
+                diagnostic(NOTIFY_ACK_SESSION, self.session);
+                diagnostic(NOTIFY_ACK_TOKEN, tx.token);
+            }
+            #[cfg(feature = "ble-gatt-dle")]
+            FR29_DLE_OBSERVATIONS[4].fetch_max(u32::from(tx.len), Ordering::Relaxed);
             link.tx = None;
             increment(TX_ACKS);
         }
+        let mut repeated = false;
         let receiver = self.receiver.as_mut().ok_or(21_u32)?;
         let mut anchor = None;
         for _ in 0..RX_COUNT {
-            let Some(packet) = receiver.pop()? else { break };
-            if packet.link_id != u16::from(LINK_ID) || packet.status & CONNECTED_RX_ERRORS != 0 {
+            #[cfg(not(feature = "ble-gatt-dle"))]
+            let packet = receiver.pop()?;
+            #[cfg(feature = "ble-gatt-dle")]
+            let packet = receiver.take_link()?;
+            let Some(packet) = packet else { break };
+            if packet.link_id != u16::from(LINK_ID) {
+                #[cfg(feature = "ble-gatt-dle")]
+                packet.payload.release(receiver);
                 continue;
             }
-            let kind = match packet.header & 3 {
-                1 => FrameKind::Continuation,
-                2 => FrameKind::Start,
-                3 => FrameKind::Control,
-                _ => continue,
+            let Some((kind, new_payload)) = received_pdu(packet.status, packet.header) else {
+                #[cfg(feature = "ble-gatt-dle")]
+                packet.payload.release(receiver);
+                continue;
             };
             if anchor.is_none() && link.anchor.is_none() {
                 let peer = Peer::new(link.request.initiator, link.request.initiator_random);
                 self.events
-                    .push(LinkEvent::Connected(peer, link.parameters))
+                    .push(BoardEvent::Connected(peer, link.parameters))
                     .map_err(|_| 22_u32)?;
+                self.session = self.session.saturating_add(1);
             }
-            anchor.get_or_insert(packet.time.data_anchor());
-            let length = usize::from(packet.header >> 8);
-            if length != 0 {
-                let bytes = packet.payload.get(..length).ok_or(20_u32)?;
-                let frame = LinkFrame::new(kind, bytes).map_err(|_| 20_u32)?;
-                increment(RX_FRAMES);
-                if kind == FrameKind::Start {
-                    record_att(bytes, ATT_RX, LAST_ATT_RX);
-                }
-                self.events
-                    .push(LinkEvent::Received(frame))
-                    .map_err(|_| 22_u32)?;
+            repeated |= !new_payload;
+            anchor.get_or_insert(
+                packet
+                    .time
+                    .data_anchor_for_phy(ADAPTIVE_PHY && link.phy.rx_two_m()),
+            );
+            let length = packet.header.to_le_bytes()[1];
+            if new_payload && length != 0 {
+                #[cfg(not(feature = "ble-gatt-dle"))]
+                let observation = {
+                    let bytes = packet.payload.get(..usize::from(length)).ok_or(20_u32)?;
+                    let frame = LinkFrame::new(kind, bytes).map_err(|_| 20_u32)?;
+                    increment(RX_FRAMES);
+                    if kind == FrameKind::Start {
+                        record_att(bytes, ATT_RX, LAST_ATT_RX);
+                    }
+                    BoardEvent::Received(frame)
+                };
+                #[cfg(feature = "ble-gatt-dle")]
+                let observation = BoardEvent::Received(kind, length, packet.payload, self.session);
+                self.events.push(observation).map_err(|_| 22_u32)?;
+            } else {
+                #[cfg(feature = "ble-gatt-dle")]
+                packet.payload.release(receiver);
             }
+        }
+        if ADAPTIVE_PHY {
+            link.phy
+                .observe_event(anchor.is_none() || repeated || link.tx.is_some());
         }
         link.advance(anchor);
         self.expire_link(now)
+    }
+
+    fn commit_payload(
+        &mut self,
+        token: u32,
+        kind: FrameKind,
+        header: [u8; 2],
+        payload: &[u8],
+    ) -> Result<TxAdmission, u32> {
+        #[cfg(feature = "ble-gatt-dle")]
+        if self.link.is_none() && !self.events.is_empty() {
+            // The disconnect is queued behind observations already sent to the Host.
+            return Ok(TxAdmission::Busy);
+        }
+        let link = self.link.as_mut().ok_or(21_u32)?;
+        if self.pending.is_some() || link.tx.is_some() {
+            return Ok(TxAdmission::Busy);
+        }
+        #[cfg(feature = "ble-gatt-dle")]
+        if payload.len() > usize::from(link.tx_airtime().octets()) {
+            return Err(20);
+        }
+        let offset = (halfword(TX_HEAD_REGISTER) & 0x3fff) * 4;
+        if !matches!(offset, TX_OFFSET | SCAN_TX_OFFSET) {
+            return Err(21);
+        }
+        let descriptor = PACKET_RAM + usize::from(offset);
+        let next = halfword(descriptor);
+        if next & TX_DONE == 0 {
+            return Err(21);
+        }
+        for (index, &byte) in payload.iter().enumerate() {
+            write8(PACKET_RAM + usize::from(TX_PAYLOAD_OFFSET) + index, byte);
+        }
+        set_halfword(descriptor + 2, u16::from_le_bytes(header));
+        set_halfword(descriptor + 4, TX_PAYLOAD_OFFSET);
+        fence(Ordering::Release);
+        set_halfword(descriptor, next & !TX_DONE);
+        #[cfg(feature = "ble-gatt-dle")]
+        FR29_DLE_OBSERVATIONS[3].fetch_max(u32::from(header[1]), Ordering::Relaxed);
+        link.tx = Some(PendingTx {
+            #[cfg(feature = "ble-gatt-dle")]
+            len: header[1],
+            token,
+            offset,
+            is_echo: echo_fragment(&mut link.echo_remaining, kind, payload),
+        });
+        increment(TX_COMMITS);
+        if kind == FrameKind::Start {
+            record_att(payload, ATT_TX, LAST_ATT_TX);
+        }
+        Ok(TxAdmission::Committed)
+    }
+
+    fn service_radio(&mut self) -> Result<(), u32> {
+        if !self.initialized {
+            return Ok(());
+        }
+        let now = clock().ok_or(3_u32)?;
+        if let Some(pending) = self.pending {
+            if let Some(status) = read_end(self.slot)? {
+                diagnostic(32, status);
+                self.pending = None;
+                self.slot = (self.slot + 1) & 15;
+                if self.link.is_some() {
+                    self.connection_ended(now)?;
+                } else {
+                    self.advertising_ended()?;
+                }
+            } else if pending.expired(now) {
+                let now = self.restart_baseband()?;
+                self.end_link(now)?;
+            }
+        } else {
+            self.schedule(now)?;
+        }
+        #[cfg(feature = "ble-gatt-event-driven")]
+        self.publish_deadline();
+        Ok(())
+    }
+
+    #[cfg(feature = "ble-gatt-dle")]
+    fn pop_into(&mut self, out: &mut LinkEvent) -> Result<bool, u32> {
+        let Some(event) = self.events.pop() else {
+            return Ok(false);
+        };
+        *out = match event {
+            BoardEvent::Connected(peer, params) => LinkEvent::Connected(peer, params),
+            BoardEvent::Received(kind, len, buffer, session) => {
+                if session != self.session {
+                    return Err(21);
+                }
+                let limit = self.link.as_ref().ok_or(21_u32)?.rx_airtime().octets();
+                let receiver = self.receiver.as_mut().ok_or(21_u32)?;
+                if len > limit {
+                    buffer.release(receiver);
+                    return Err(20);
+                }
+                *out = LinkEvent::Received(LinkFrame::EMPTY);
+                let LinkEvent::Received(frame) = out else {
+                    unreachable!()
+                };
+                let copied = frame.read_payload(kind, len, |i| buffer.byte(i));
+                buffer.release(receiver);
+                copied.map_err(|_| 20_u32)?;
+                increment(RX_FRAMES);
+                FR29_DLE_OBSERVATIONS[2].fetch_max(u32::from(len), Ordering::Relaxed);
+                if kind == FrameKind::Start {
+                    record_att(frame.payload(), ATT_RX, LAST_ATT_RX);
+                }
+                return Ok(true);
+            }
+            BoardEvent::Acknowledged(token) => LinkEvent::Acknowledged(token),
+            BoardEvent::Disconnected(reason) => LinkEvent::Disconnected(reason),
+            BoardEvent::ParametersUpdated(params) => LinkEvent::ParametersUpdated(params),
+            BoardEvent::PhyUpdated(tx, rx) => LinkEvent::PhyUpdated(tx, rx),
+        };
+        Ok(true)
     }
 
     fn expire_link(&mut self, now: u32) -> Result<(), u32> {
@@ -311,9 +791,24 @@ impl Radio {
         let established = self.link.as_ref().is_some_and(|link| link.anchor.is_some());
         self.link = None;
         if established {
+            #[cfg(feature = "ble-gatt-dle")]
+            {
+                // No slot is in flight. Retire this epoch's held RX descriptors.
+                // Preserve an undelivered connect before reporting its disconnect.
+                let mut connected = None;
+                while let Some(event) = self.events.pop() {
+                    if matches!(event, BoardEvent::Connected(..)) {
+                        connected = Some(event);
+                    }
+                }
+                self.receiver = None;
+                if let Some(event) = connected {
+                    self.events.push(event).map_err(|_| 22_u32)?;
+                }
+            }
             self.advertisement = None;
             self.events
-                .push(LinkEvent::Disconnected(0x08))
+                .push(BoardEvent::Disconnected(0x08))
                 .map_err(|_| 22_u32)?;
         } else if let Some(advertisement) = self.advertisement {
             self.start_advertising(now, &advertisement);
@@ -339,6 +834,20 @@ impl Radio {
     fn schedule(&mut self, now: u32) -> Result<(), u32> {
         if let Some(link) = self.link.as_mut() {
             link.prepare_timing_update()?;
+            if ADAPTIVE_PHY && let Some(rates) = link.phy.apply(link.counter) {
+                #[cfg(feature = "ble-gatt-dle")]
+                {
+                    link.tx_two_m = rates & 3 != 0;
+                }
+                // Preserve the controller-owned fields above the RX and TX rate pairs.
+                set_halfword(
+                    CONTROL + 6,
+                    (halfword(CONTROL + 6) & !15) | u16::from(rates),
+                );
+                self.events
+                    .push(BoardEvent::PhyUpdated(1 + (rates & 3), 1 + (rates >> 2)))
+                    .map_err(|_| 22_u32)?;
+            }
             let start = link.event.start.coarse;
             let ahead = start.wrapping_sub(now) & CLOCK_MASK;
             if !(1..HALF_CLOCK).contains(&ahead) {
@@ -356,7 +865,10 @@ impl Radio {
                     set_halfword(CONTROL + 0x2e, limit);
                     set_halfword(CONTROL + 0x30, limit);
                 }
-                let duration = submit_link(self.slot, link.event, link.counter);
+                let event = link.event;
+                #[cfg(feature = "ble-gatt-dle")]
+                let event = event.with_data_airtime(link.rx_airtime(), link.slot_tx_airtime());
+                let duration = submit_link(self.slot, event, link.counter);
                 self.pending = Some(SlotWatchdog::new(start, duration));
             }
         } else if let Some(advertisement) = self.advertisement
@@ -379,6 +891,86 @@ impl Radio {
 
 impl LinkBackend for Radio {
     type Error = u32;
+
+    fn supports_two_m(&self) -> bool {
+        ADAPTIVE_PHY
+    }
+
+    fn peer_two_m(&mut self, supported: bool) {
+        if ADAPTIVE_PHY && let Some(link) = self.link.as_mut() {
+            link.phy.peer_features(supported);
+        }
+    }
+
+    fn phy_response_mask(&mut self) -> u8 {
+        self.link.as_mut().map_or(1, |link| link.phy.respond())
+    }
+
+    fn take_feature_query(&mut self) -> bool {
+        self.supports_two_m()
+            && self
+                .link
+                .as_mut()
+                .is_some_and(|link| link.phy.take_feature_query())
+    }
+
+    fn take_phy_request(&mut self) -> Option<u8> {
+        if !self.supports_two_m() {
+            return None;
+        }
+        self.link.as_mut()?.phy.take_request()
+    }
+
+    fn phy_rejected(&mut self) {
+        if let Some(link) = self.link.as_mut() {
+            link.phy.rejected();
+        }
+    }
+
+    fn schedule_phy(&mut self, instant: u16, central_tx: u8, peripheral_tx: u8) -> bool {
+        self.link.as_mut().is_some_and(|link| {
+            !(self.pending.is_some()
+                && instant == link.counter
+                && (central_tx | peripheral_tx) != 0)
+                && link
+                    .phy
+                    .schedule(link.counter, instant, central_tx, peripheral_tx)
+        })
+    }
+
+    #[cfg(feature = "ble-gatt-dle")]
+    fn supports_data_length(&self) -> bool {
+        true
+    }
+
+    #[cfg(feature = "ble-gatt-dle")]
+    fn data_length_updated(&mut self, limits: DataLength) {
+        if let Some(link) = self.link.as_mut() {
+            link.limits = limits;
+            record_limits(limits);
+        }
+    }
+
+    #[cfg(feature = "ble-gatt-dle")]
+    fn max_acl_fragment_len(&self) -> u8 {
+        self.link
+            .as_ref()
+            .map_or(27, |link| link.tx_airtime().octets())
+    }
+
+    #[cfg(not(feature = "ble-gatt-dle"))]
+    fn max_acl_fragment_len(&self) -> u8 {
+        // Retain the separately qualified FreeRTOS SRAM probe setting.
+        if cfg!(all(
+            feature = "ble-gatt-mac-probe",
+            feature = "ble-gatt-freertos",
+            not(feature = "ble-gatt-xip")
+        )) {
+            15
+        } else {
+            27
+        }
+    }
 
     fn reset(&mut self) -> Result<(), u32> {
         self.stop()?;
@@ -407,9 +999,16 @@ impl LinkBackend for Radio {
 
     fn stop(&mut self) -> Result<(), u32> {
         if self.pending.is_some() {
-            wait_connection_event(self.slot)?;
-            self.slot = (self.slot + 1) & 15;
-            self.pending = None;
+            match wait_connection_event(self.slot) {
+                Ok(_) => {
+                    self.slot = (self.slot + 1) & 15;
+                    self.pending = None;
+                }
+                Err(EVENT_COMPLETION_TIMEOUT) => {
+                    self.restart_baseband()?;
+                }
+                Err(error) => return Err(error),
+            }
         }
         self.receiver = None;
         self.advertisement = None;
@@ -420,64 +1019,58 @@ impl LinkBackend for Radio {
         Ok(())
     }
 
+    #[cfg(not(feature = "ble-gatt-dle"))]
     fn poll(&mut self) -> Result<Option<LinkEvent>, u32> {
-        if let Some(event) = self.events.pop() {
-            return Ok(Some(event));
+        if self.events.is_empty() {
+            self.service_radio()?;
         }
-        if !self.initialized {
-            return Ok(None);
-        }
-        let now = clock().ok_or(3_u32)?;
-        if let Some(pending) = self.pending {
-            if let Some(status) = read_end(self.slot)? {
-                diagnostic(32, status);
-                self.pending = None;
-                self.slot = (self.slot + 1) & 15;
-                if self.link.is_some() {
-                    self.connection_ended(now)?;
-                } else {
-                    self.advertising_ended()?;
-                }
-            } else if pending.expired(now) {
-                let now = self.restart_baseband()?;
-                self.end_link(now)?;
-            }
-        } else {
-            self.schedule(now)?;
-        }
-        #[cfg(feature = "ble-gatt-event-driven")]
-        self.publish_deadline();
         Ok(self.events.pop())
     }
 
+    #[cfg(feature = "ble-gatt-dle")]
+    fn poll(&mut self) -> Result<Option<LinkEvent>, u32> {
+        let mut event = LinkEvent::Disconnected(0);
+        Ok(self.poll_into(&mut event)?.then_some(event))
+    }
+
+    #[cfg(feature = "ble-gatt-dle")]
+    fn service_backpressure(&mut self) -> Result<(), u32> {
+        self.service_radio()
+    }
+
+    #[cfg(feature = "ble-gatt-dle")]
+    fn poll_into(&mut self, out: &mut LinkEvent) -> Result<bool, u32> {
+        if self.events.is_empty() {
+            self.service_radio()?;
+        }
+        self.pop_into(out)
+    }
+
     fn transmit(&mut self, token: u32, frame: LinkFrame) -> Result<TxAdmission, u32> {
-        let link = self.link.as_mut().ok_or(21_u32)?;
-        if self.pending.is_some() || link.tx.is_some() {
-            return Ok(TxAdmission::Busy);
-        }
-        let offset = (halfword(TX_HEAD_REGISTER) & 0x3fff) * 4;
-        if !matches!(offset, TX_OFFSET | SCAN_TX_OFFSET) {
-            return Err(21);
-        }
-        let descriptor = PACKET_RAM + usize::from(offset);
-        let next = halfword(descriptor);
-        if next & TX_DONE == 0 {
-            return Err(21);
-        }
-        for (index, &byte) in frame.payload().iter().enumerate() {
-            write8(PACKET_RAM + usize::from(TX_PAYLOAD_OFFSET) + index, byte);
-        }
         let pdu = frame.as_pdu();
-        set_halfword(descriptor + 2, u16::from_le_bytes([pdu[0], pdu[1]]));
-        set_halfword(descriptor + 4, TX_PAYLOAD_OFFSET);
-        fence(Ordering::Release);
-        set_halfword(descriptor, next & !TX_DONE);
-        link.tx = Some((token, descriptor));
-        increment(TX_COMMITS);
-        if frame.kind() == FrameKind::Start {
-            record_att(frame.payload(), ATT_TX, LAST_ATT_TX);
+        self.commit_payload(token, frame.kind(), [pdu[0], pdu[1]], frame.payload())
+    }
+
+    #[cfg(feature = "ble-gatt-dle")]
+    fn transmit_payload(
+        &mut self,
+        token: u32,
+        kind: FrameKind,
+        more_data: bool,
+        payload: &[u8],
+    ) -> Result<TxAdmission, u32> {
+        let len = u8::try_from(payload.len()).map_err(|_| 20_u32)?;
+        if (kind == FrameKind::Control && !(1..=27).contains(&len))
+            || (kind == FrameKind::Start && len < 4)
+        {
+            return Err(20);
         }
-        Ok(TxAdmission::Committed)
+        self.commit_payload(
+            token,
+            kind,
+            [kind as u8 | u8::from(more_data) << 4, len],
+            payload,
+        )
     }
 
     fn connection_update(&mut self, indication: &[u8]) -> Result<(), u32> {
@@ -522,11 +1115,55 @@ fn record_att(payload: &[u8], counter: usize, last_opcode: usize) {
     }
 }
 
+// The Mac compares the entire value. SWD publishes its first eight bytes and
+// session only after the final LL fragment is acknowledged, including the 15-byte bench.
+fn echo_fragment(remaining: &mut u8, kind: FrameKind, payload: &[u8]) -> bool {
+    match kind {
+        FrameKind::Start => {
+            *remaining = 0;
+            let [att_len, 0, 4, 0, 0x1b, 9, 0, data @ ..] = payload else {
+                return false;
+            };
+            let Some(value_len @ 1..=20) = att_len.checked_sub(3) else {
+                return false;
+            };
+            let Ok(part_len) = u8::try_from(data.len()) else {
+                return false;
+            };
+            let Some(missing) = value_len.checked_sub(part_len) else {
+                return false;
+            };
+            let mut prefix = [0u8; 8];
+            let count = prefix.len().min(data.len());
+            prefix[..count].copy_from_slice(&data[..count]);
+            diagnostic(NOTIFY_ACK_TOKEN, 0);
+            let (words, _) = prefix.as_chunks::<4>();
+            diagnostic(NOTIFY_ACK_LOW, u32::from_le_bytes(words[0]));
+            diagnostic(NOTIFY_ACK_HIGH, u32::from_le_bytes(words[1]));
+            *remaining = missing;
+        }
+        FrameKind::Continuation if *remaining > 0 => {
+            let Ok(len) = u8::try_from(payload.len()) else {
+                return false;
+            };
+            let Some(missing) = remaining.checked_sub(len) else {
+                *remaining = 0;
+                return false;
+            };
+            *remaining = missing;
+        }
+        _ => return false,
+    }
+    *remaining == 0
+}
+
+#[cfg(not(test))]
 fn halfword(address: usize) -> u16 {
     // SAFETY: This module reads only fixed, aligned control and TX descriptor fields.
     unsafe { read_volatile(address as *const u16) }
 }
 
+#[cfg(not(test))]
 fn set_halfword(address: usize, value: u16) {
     // SAFETY: These are aligned fields in the installed control/descriptor
     // records, written between completed events while the scheduler is idle.

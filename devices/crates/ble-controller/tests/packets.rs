@@ -27,6 +27,7 @@ fn test_should_preserve_owned_payload_and_set_then_clear_only_the_md_bit() {
 fn test_should_reject_invalid_link_payloads_and_keep_empty_continuations_explicit() {
     assert!(LinkFrame::new(FrameKind::Control, &[]).is_err());
     assert!(LinkFrame::new(FrameKind::Start, &[0; 3]).is_err());
+    #[cfg(not(feature = "data-length"))]
     assert!(LinkFrame::new(FrameKind::Continuation, &[0; 28]).is_err());
     assert_eq!(
         LinkFrame::new(FrameKind::Continuation, &[])
@@ -58,4 +59,42 @@ fn test_should_keep_bounded_fifo_order_through_full_and_ring_wrap() {
     q.clear();
     assert_eq!(q.pop(), None);
     assert!(OwnedQueue::<u8, 0>::new().push(1).is_err());
+}
+
+#[cfg(feature = "data-length")]
+#[test]
+fn extended_acl_uses_full_unsigned_length_without_expanding_control_pdus() {
+    for len in [27, 28, 250, 251] {
+        let bytes: Vec<_> = (0..len).collect();
+        let frame = LinkFrame::new(FrameKind::Start, &bytes).unwrap();
+        assert_eq!(frame.payload(), bytes);
+        assert_eq!(frame.as_pdu()[1], len);
+        assert_eq!(
+            LinkFrame::from_reader(FrameKind::Start, len, |n| bytes[n]).unwrap(),
+            frame
+        );
+    }
+    assert!(LinkFrame::new(FrameKind::Control, &[0; 28]).is_err());
+    assert!(LinkFrame::new(FrameKind::Continuation, &[0; 252]).is_err());
+}
+
+#[cfg(feature = "data-length")]
+#[test]
+fn refilling_frame_preserves_valid_contents_on_failure_and_hides_old_tail() {
+    let mut frame = LinkFrame::EMPTY;
+    assert_eq!(frame.as_pdu(), &[1, 0]);
+    frame
+        .read_payload(FrameKind::Start, 251, |i| u8::try_from(i).unwrap())
+        .unwrap();
+    assert_eq!(frame.payload()[250], 250);
+    assert!(
+        frame
+            .read_payload(FrameKind::Control, 28, |_| panic!("invalid read"))
+            .is_err()
+    );
+    assert_eq!(frame.payload().len(), 251);
+    frame
+        .read_payload(FrameKind::Continuation, 1, |_| 42)
+        .unwrap();
+    assert_eq!(frame.as_pdu(), &[1, 1, 42]);
 }

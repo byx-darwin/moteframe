@@ -8,6 +8,7 @@ pub mod connection;
 pub mod gatt;
 #[cfg(feature = "ble-gatt-probe")]
 pub mod gatt_runner;
+pub mod phy;
 pub mod radio_trim;
 #[cfg(feature = "ble-gatt-probe")]
 pub mod wake;

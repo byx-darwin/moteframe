@@ -10,6 +10,7 @@ workspace = true
 
 [features]
 external-wake = []
+data-length = []
 
 [dependencies]
 bt-hci.workspace = true

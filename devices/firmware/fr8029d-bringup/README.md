@@ -181,28 +181,79 @@ cargo build --offline --locked --release --target thumbv8m.main-none-eabi \
   --features ble-gatt-board --bin fr8029d-ble-adv
 ```
 
-GATT 探针名为 `FR29-GAT2`。Notify 版使用以 `A0` 结尾的测试地址，便于手机重新发现新增的描述符。主服务 UUID 为 `2f8029d0-7ff7-48b0-a64e-d6ebc735b251`，特征值 UUID 为 `2f8029d1-7ff7-48b0-a64e-d6ebc735b251`。特征值初始为 8 个零字节，支持读取、带响应的 8 字节写入和通知，值保存在 SRAM，下一次启动时清零。
+GATT 探针名为 `FR29-GAT2`。新增 FFF0 后，裸机 SRAM、裸机 Flash 和 FreeRTOS 探针的测试地址分别以 `C0`、`C1` 和 `C2` 结尾，方便客户端重新发现服务。主服务 UUID 为 `2f8029d0-7ff7-48b0-a64e-d6ebc735b251`，特征值 UUID 为 `2f8029d1-7ff7-48b0-a64e-d6ebc735b251`。特征值初始为 8 个零字节，支持读取、带响应的 1～20 字节写入，以及按实际写入长度原样回显的通知，值保存在 SRAM，下一次启动时清零。
 
-板端范围为单连接外设、三频道 legacy 广播、LE 1M 和 CSA1。连接间隔与信道图更新在指定事件计数生效。硬件探针通过 J-Link 加载到 SRAM，在原厂应用入口之前启动，复位即可回到原厂应用。配对、加密、2M/Coded 及多连接未纳入此探针。
+一次 20 字节通知包含 3 字节 ATT 头和 4 字节 L2CAP 头，恰好占满标准裸机版的 27 字节链路层载荷。标准 FreeRTOS 的 Mac SRAM 测试配置会把这条通知分为 15 和 12 字节的两个无线包，应用仍收到一条 20 字节通知。写入较短值后，读取和 Notify 都只返回本次写入的字节。Mac 已在裸机和 FreeRTOS 的双向 2M、固定 1M 四种配置下验证 20 字节写入与原样通知，每种均覆盖首次连接和重连。
+
+板端支持单连接外设、三频道 legacy 广播和 CSA1。广播和首次建链使用 LE 1M，两版都支持在连接中协商 LE 2M。连接间隔、PHY 和信道图更新在约定的连接事件生效。硬件探针通过 J-Link 加载到 SRAM，在原厂应用入口之前启动，复位即可回到原厂应用。配对、加密、LE Coded 和多连接仍待支持。
 
 实机复测先用原厂连接核对了 1M 的 PHY 控制字 `0x1100`。手机随后连接 Rust 探针，完成服务发现和 ATT 读取。板端记录两次连接间隔更新均已生效。宿主测试覆盖带响应写入、应用收到完整 8 字节以及写后读回。信道图更新、丢包重传和长期稳定性待独立验证。
 
-手机写入复测时，J-Link 抓到发往值句柄 `0x0009` 的 Write Request（`0x12`）。App 把 16 个十六进制字符按 ASCII 文本发送，板端按固定 8 字节长度校验返回了 `0x0D`（属性值长度无效）。直接用文本模式发送八个字符 `FR29OK42` 后，板端完成应用写入并返回 Write Response（`0x13`）。后续 Read Response（`0x0B`）的值为 `46 52 32 39 4F 4B 34 32`，与写入逐字节一致。支持 HEX 输入的 App 也可以选择 HEX 模式并发送这 8 个字节。原始记录见本地 `target/fr8029d-gatt-write.uxGs8n` 下的 `att-reconnected.log` 与 `att-readback.log`。
+早期固定 8 字节版本的手机写入复测中，J-Link 抓到发往值句柄 `0x0009` 的 Write Request（`0x12`）。App 把 16 个十六进制字符按 ASCII 文本发送，板端按固定 8 字节长度校验返回了 `0x0D`（属性值长度无效）。直接用文本模式发送八个字符 `FR29OK42` 后，板端完成应用写入并返回 Write Response（`0x13`）。后续 Read Response（`0x0B`）的值为 `46 52 32 39 4F 4B 34 32`，与写入逐字节一致。支持 HEX 输入的 App 也可以选择 HEX 模式并发送这 8 个字节。原始记录见本地 `target/fr8029d-gatt-write.uxGs8n` 下的 `att-reconnected.log` 与 `att-readback.log`。
 
 手机在同一特征值上开启 Notify 后，可以用 Write Request 以文本模式发送 `FR29NT75`，板端在写入成功确认之后主动通知这 8 个字节。退订后停止回显，重连时重新订阅。实机用 J-Link 记录了订阅（CCCD 写入 `01 00`）、手机发送的 8 字节写入，以及随后返回的 Write Response（`0x13`）和 Handle Value Notification（`0x1B`）。从写入到通知之间没有新的 Read 请求。手机截图显示 UTF-8 文本 `FR29NT75` 和对应的 HEX `46 52 32 39 4E 54 37 35`。记录见本地 `target/fr8029d-gatt-notify.J8Em4v` 下的 `phone-notify.log`。
 
 Notify 版 SRAM 镜像含代码与初始化数据共 58984 字节，比读写版增加 904 字节。栈预留 22272 字节，此轮手机订阅、写入和通知期间的栈填充值覆盖深度为 11464 字节。实验未写 Flash。
 
-### Mac 蓝牙验收
+### 蓝牙连接速率
 
-从仓库根目录运行对应 SRAM 探针的验收命令。J-Link 端按下节方法装载探针，将 `run_notify_trial` 的第三个参数设为 `2`，观察两次独立连接的写入和发送完成。板端观察窗口要覆盖 Mac 的总超时。
+裸机和 FreeRTOS 的 GATT 默认允许 LE 1M 和 LE 2M。对端支持 2M 时，双方可以在连接中切换速率。控制器分别应用两个方向的协商结果。只支持 1M 的对端可照常发现服务、写入和订阅通知。构建时在原有特性上追加 `ble-gatt-1m-only` 可将任一版固定为 1M。
+
+速率策略按已执行的连接事件观察链路。连续 8 个事件出现未收到有效包、收到重复包或待发送数据仍未获确认时，已使用 2M 的外设请求双向 1M。切到 1M 后连续 128 个健康事件可再次请求 2M。门限是本项目的策略参数，反映事件质量，不能换算成逐比特误码率。中央设备可以回复维持当前速率，此时外设继续按原速率通信并等待至少 128 个事件再重试。
+
+Mac 实测中，普通裸机版协商到双向 2M，断开重连后完成 8 字节带响应写入及 Notify 回显。给测试镜像注入连续劣化事件后，板端请求 1M，这台 Mac 两次均指示维持原速率。对端同意降速、在约定事件切到 1M 及恢复到 2M 的路径由宿主测试覆盖。
+
+FreeRTOS 事件驱动版在 Mac 首次连接和重连时，分别写入了两个不同的 20 字节值。Mac 两次收到完整回显，J-Link 在两次通知确认时均读到双向 2M。固定 1M 构建也通过相同测试。开启 2M 后，FreeRTOS 事件驱动 Flash 镜像的可加载内容由 68,960 B 增至 69,976 B（+1,016 B）。在 SRAM 测试镜像中，BLE 任务栈预留 13,312 B，本轮栈填充值覆盖了 10,248 B。
+
+### 可选的 251 字节长包
+
+裸机和 FreeRTOS 共用 `ble-gatt-dle` 编译开关。默认使用短包，单个链路层数据包最多 27 字节。开启后，每次连接仍从 27 字节起步，分别协商收、发方向的数据长度与时间，最高 251 字节、2,120 µs。LE 1M 和 LE 2M 都可以使用长包。现有 Rust 特征值单次写入和 Notify 回显仍为 1～20 字节。
+
+从本目录构建时选择运行环境和长包开关。以下命令生成事件驱动裸机长包版的 Flash ELF。标准版去掉 `ble-gatt-dle`。FreeRTOS 版追加 `ble-gatt-freertos` 并将 `FREERTOS_KERNEL_DIR` 指向 FreeRTOS-Kernel V11.2.0。
 
 ```sh
-swift devices/scripts/ble_connect.swift FR29-GAT2 --timeout 60
-swift devices/scripts/ble_connect.swift FR29-RTOS --timeout 60
+cargo build --release --locked --target thumbv8m.main-none-eabi \
+  --bin fr8029d-ble-adv --features ble-gatt-xip,ble-gatt-event-driven,ble-gatt-dle
+python3 tools/gatt_notify_memory.py flash-bin "$BOARD_FLASH_BACKUP" \
+  target/thumbv8m.main-none-eabi/release/fr8029d-ble-adv fr8029d-bare-dle.bin
 ```
 
-两版都先以 Write Request 发送 `FR29NT75`。首次连接收到写确认和匹配的 Notify 后，Mac 主动断开，再次扫描并连接同一探针，重新订阅后发送 `FR29RC02`。两轮都通过并正常断开时，脚本输出 `reconnect_verified`，退出码为 0。失败时的 JSON 日志包含 `phase`，便于核对扫描、连接、服务发现、订阅、写确认或回显。扫描超时日志还记录收到的广播数和匹配名称的次数。
+`BOARD_FLASH_BACKUP` 指向当前板的 1 MiB Flash 备份。打包工具校验启动头、应用向量和 CRC，保留本板的启动配置，生成从物理偏移 0 开始的启动区与应用。输出文件比下表的应用载荷多 8,192 字节启动区。
+
+| 事件驱动 Flash 版 | 应用载荷，标准 → 长包 | 静态 RAM，标准 → 长包 | 两档的栈预留 |
+| --- | ---: | ---: | ---: |
+| 裸机 | 67,636 → 72,656 B | 264 → 1,216 B | 主栈 22,272 B |
+| FreeRTOS | 70,924 → 75,920 B | 616 → 1,560 B | 主栈 1,792 B、BLE 栈 16,384 B、Idle 栈 1,024 B |
+
+静态 RAM 包含数据、BSS 和两者之间的对齐，不含栈和独立的 256 B 诊断区。2026-11-26 用临时 SRAM 测试特征传输 244 字节确定性数据，连同 ATT 的 3 字节和 L2CAP 的 4 字节恰为 251 字节。Mac 逐字节验证了收到的数据，J-Link 记录了 251 字节接收、发送和发送确认。裸机及 FreeRTOS 分别在固定 1M 和双向 2M 完成首次连接和重连，共 8 次。四组测试中观察到的最高栈水位为裸机主栈 12,256 B、FreeRTOS BLE 任务栈 12,280 B。该水位取自 SRAM 测试镜像。
+
+### SDK v0.3.6 外设服务
+
+两档固件都在原 Rust 服务后追加了 SDK 示例的 `FFF0`。原回显值句柄仍为 `0x0009`，通知订阅句柄仍为 `0x000A`。SDK 客户端按 UUID 发现以下特征。
+
+| 特征 | 读取 | 带响应写入和订阅 |
+| --- | --- | --- |
+| `FFF3` | `00 01 02 03 04` | 接受最多 20 字节的写入，写后读取仍返回固定值。开启 Notify 时收到 `01 02 03 04 05` |
+| `0783B03E-8535-B5A0-7140-A304F4FF5CBA` | `11 22 33 44 55` | 只读 |
+
+要验证写什么就回什么，选择原来的 `2f8029d1…b251` 特征。要对照 SDK 的固定响应，可在仓库根目录运行 `swift devices/scripts/ble_sdk_compat.swift FR29-GAT2`，FreeRTOS SRAM 版用 `FR29-RTOS`，SDK 对照板用 `802x_Ble_Periphreal`。
+
+### Mac 蓝牙验收
+
+Mac 验收使用 `ble-gatt-mac-probe` 特性构建 SRAM 镜像。两版沿用 14 字节主广播，分别发布测试标记 `MFR29A1`（裸机）和 `MFR29R1`（FreeRTOS）。标记位于 `0xFFFF` 测试厂商字段中，连接后可读取原有 GAP 设备名。这个模式为连接接收窗口每侧预留 1.024 ms 固定保护时间，再加上按时钟精度计算的余量。普通构建和 Flash 执行版使用名称广播及原有接收时序。
+
+Mac 测试镜像请求 30 ms 的广播间隔，再加入基带调度所用的随机延迟。关闭长包时，裸机版的链路层发送载荷上限为 27 字节，FreeRTOS 的 Mac SRAM 测试镜像使用 15 字节上限，控制器在最后一片收到确认后返还整包的发送额度。两种标准配置的 Host ACL 缓冲区均为 27 字节。FreeRTOS 事件驱动的 Mac 测试镜像为中断主栈预留 512 B，BLE 和 Idle 任务栈分别预留 13 KiB 和 1 KiB。
+
+2026-11-26 在校准数据版本为 2 的 FR8029D 上，Rust 冷启动初始化按 SDK v0.3.6 的配置选择对应的调制解调器参数，用本板出厂校准值计算八组频段参数。普通裸机 SRAM 镜像在 LE 1M、27 字节上限下用三个新测试地址分别做了首次服务发现和一次重连。PacketLogger 在三次首次连接中均记录到 Mac 收到第一页服务列表（`0x11`），从句柄 `0x0007` 续查并收到第二页。六次连接均完成 8 字节带响应写入和逐字节一致的 Notify 回显。
+
+从仓库根目录运行对应探针的验收命令。J-Link 端按下节装载镜像，将 `run_notify_trial` 的第三个参数设为 `2`，观察两次独立连接的写入和发送完成。板端观察窗口要覆盖 Mac 的总超时。
+
+```sh
+swift devices/scripts/ble_connect.swift FR29-GAT2 --timeout 120
+swift devices/scripts/ble_connect.swift FR29-RTOS --timeout 120
+```
+
+Mac 脚本支持按名称和测试厂商字段匹配，`connect_attempt` 的 `matched_by` 记录实际使用的字段。连接后脚本核对服务和特征值 UUID。两版都先以 Write Request 发送 20 字节的 `FR29NT75-0123456789A`。首次连接收到写确认和匹配的 Notify 后，Mac 主动断开，再次扫描并连接同一探针，重新订阅后发送 20 字节的 `FR29RC02-abcdefghijZ`。两轮都通过并正常断开时，脚本输出 `reconnect_verified`，退出码为 0。失败时的 JSON 日志包含 `phase`，便于核对扫描、连接、服务发现、订阅、写确认或回显。扫描超时日志还记录收到和匹配目标的广播数。
 
 省略探针名仍使用 `RUST-LINK` 的原有 UUID、写入和独立 Notify 响应。可用 `swift -D BLE_CONNECT_TESTS devices/scripts/ble_connect.swift` 离线核对参数和回显判定。
 
@@ -214,9 +265,9 @@ Mac 内置控制器的 HCI 对照使用 Apple PacketLogger 27.2 的管理员实�
 
 ### 事件驱动 SRAM 候选版
 
-用 `ble-gatt-event-driven` 分别搭配 `ble-gatt-board` 和 `ble-gatt-freertos`。基带 IRQ0 和 TIMER0 分别处理无线事件完成和最早截止时间。裸机通过 WFI 等待，FreeRTOS 的 BLE 任务通过任务通知等待。两版使用同一套 GATT 服务和 8 字节 Notify 回显。ISR 记录唤醒，BLE 前台仍串行读取和确认基带状态。
+用 `ble-gatt-event-driven` 分别搭配 `ble-gatt-board` 和 `ble-gatt-freertos`。基带 IRQ0 和 TIMER0 分别处理无线事件完成和最早截止时间。裸机通过 WFI 等待，FreeRTOS 的 BLE 任务通过任务通知等待。两版使用同一套 GATT 服务，Notify 按写入长度回显，最多 20 字节。ISR 记录唤醒，BLE 前台仍串行读取和确认基带状态。
 
-本地已生成的 J-Link 装载脚本位于 `target/fr8029d-event-driven-check/night-trial`。如需重建，从仓库根目录执行以下命令。FreeRTOS 使用下节所述固定版本的内核检出，可通过 `FREERTOS_KERNEL_DIR` 指定。
+从仓库根目录执行以下命令，为当前版本生成 J-Link 装载脚本。FreeRTOS 使用下节所述固定版本的内核检出，可通过 `FREERTOS_KERNEL_DIR` 指定。
 
 ```sh
 fr_build=target/fr8029d-event-driven-check
@@ -224,10 +275,10 @@ fr_manifest=devices/firmware/fr8029d-bringup/Cargo.toml
 fr_tools=devices/firmware/fr8029d-bringup/tools
 fr_elf=thumbv8m.main-none-eabi/release/fr8029d-ble-adv
 cargo build --offline --locked --release --manifest-path "$fr_manifest" \
-  --target thumbv8m.main-none-eabi --features ble-gatt-board,ble-gatt-event-driven \
+  --target thumbv8m.main-none-eabi --features ble-gatt-board,ble-gatt-event-driven,ble-gatt-mac-probe \
   --target-dir "$fr_build/bare-sram" --bin fr8029d-ble-adv
 cargo build --offline --locked --release --manifest-path "$fr_manifest" \
-  --target thumbv8m.main-none-eabi --features ble-gatt-freertos,ble-gatt-event-driven \
+  --target thumbv8m.main-none-eabi --features ble-gatt-freertos,ble-gatt-event-driven,ble-gatt-mac-probe \
   --target-dir "$fr_build/rtos-sram" --bin fr8029d-ble-adv
 fr_pack=$(mktemp -d "$fr_build/trial.XXXXXX")
 python3 "$fr_tools/gatt_notify_memory.py" pack "$fr_build/bare-sram/$fr_elf" \
@@ -240,24 +291,26 @@ python3 "$fr_tools/gatt_notify_memory.py" pack "$fr_build/rtos-sram/$fr_elf" \
 
 ```sh
 fr_tools=devices/firmware/fr8029d-bringup/tools
-fr_pack=${fr_pack:-target/fr8029d-event-driven-check/night-trial}
+fr_pack=${fr_pack:?请先构建并打包当前版本的 SRAM 镜像}
 fr_trial=$(mktemp -d /tmp/fr8029d-event-trial.XXXXXX)
 openocd -f "$fr_tools/fr8029d_openocd.cfg" \
   -f "$fr_pack/FR29-GAT2-event.tcl" -f "$fr_tools/gatt_notify_sram_trial.tcl" \
-  -c "run_notify_trial 90 {$fr_trial/stock-prefix.bin} 2" -c shutdown
+  -c "run_notify_trial 150 {$fr_trial/stock-prefix.bin} 2" -c shutdown
 ```
 
-看到 `NOTIFY_ADVERTISING` 后在另一终端运行 `swift devices/scripts/ble_connect.swift FR29-GAT2 --timeout 60`。Mac 端核对两次独立连接的写确认和 Notify，J-Link 端核对两次 `TX_QUEUE_CONFIRMED`，试验结尾应有 `STOCK_RESTORED`。如果 Mac 停在扫描阶段，仍可查看 `WAKE_STATS`。`WAIT_ATTEMPTS` 统计进入等待前的尝试，实际阻塞需要用调试状态核对。`MIN_LEAD_TICKS` 以 312.5 µs 为单位，`0xffffffff` 表示本轮未提交连接事件。`STACK_WATERMARK` 记录本轮实际栈覆盖深度。
+看到 `NOTIFY_ADVERTISING` 后在另一终端运行 `swift devices/scripts/ble_connect.swift FR29-GAT2 --timeout 120`。Mac 端核对两次独立连接的写确认和 Notify，J-Link 端核对不同 `SESSION` 的两条 `NOTIFY_ACK`，记录包含发送令牌和回显值。`PHY_RATES` 记录确认时的板端收发速率，5 表示双向 2M，0 表示双向 1M。试验支持已核对复位向量的出厂镜像和 SDK v0.3.6 外设示例，结尾的 `STOCK_RESTORED` 表示已重启原先驻留在 Flash 的固件。请用同一提交的工具和 SRAM 镜像运行这项试验。
 
-| 事件驱动候选版 | 裸机 | FreeRTOS |
+`CONNECT_RX` 分别统计通过校验的连接请求、硬件接收状态拒绝和解码拒绝。`LAST_REJECTION` 的最高位为 0 时，低位保存接收状态字。最高位为 1 时，低位对应 `ConnectError` 从 1 开始的枚举序号。若 Mac 停在扫描阶段，还可查看 `WAKE_STATS`。`WAIT_ATTEMPTS` 统计进入等待前的尝试，实际阻塞需要用调试状态核对。`MIN_LEAD_TICKS` 以 312.5 µs 为单位，`0xffffffff` 表示本轮未提交连接事件。`STACK_WATERMARK` 记录本轮实际栈覆盖深度。
+
+| 早期事件驱动候选版（增加 2M 前的测量） | 裸机 | FreeRTOS |
 | --- | ---: | ---: |
-| Flash 执行版负载 | 64,244 B | 68,000 B |
-| 较改造前的 Flash 增量 | +5,256 B | +6,440 B |
+| Flash 执行版负载 | 65,084 B | 68,368 B |
+| 较同版本轮询版的 Flash 增量 | +5,024 B | +5,728 B |
 | Flash 执行版静态 SRAM（含对齐） | 264 B | 616 B |
 | Flash 执行版栈预留 | 22,272 B | 19,200 B |
-| SRAM 试验版栈预留 | 16,128 B | 16,640 B |
+| SRAM 试验版栈预留 | 16,128 B | 16,384 B |
 
-这些数字来自 ELF。SRAM 试验版将镜像和栈放在同一 SRAM 区域，FreeRTOS 的 BLE 任务预留 14 KiB，主栈预留 1,280 B，Idle 栈预留 1 KiB。实机栈水位和连接窗口余量待复测。相同目录下的 `*-polling.tcl` 是轮询对照镜像。
+这些数字来自 ELF。SRAM 试验版将镜像和栈放在同一 SRAM 区域。当时 FreeRTOS 试验版的 BLE 任务预留 14 KiB，主栈和 Idle 栈各预留 1 KiB。裸机轮询对照的 SRAM 试验版主栈预留 20.75 KiB。实机栈水位和连接窗口余量待复测。构建轮询对照时，去掉 `ble-gatt-event-driven` 特性并重新打包 ELF。
 
 ## FreeRTOS 单应用任务
 
@@ -280,7 +333,7 @@ openocd -f firmware/fr8029d-bringup/tools/fr8029d_openocd.cfg \
   -c 'run_notify_trial 240 target/fr8029d-freertos/stock-before-trial.bin' -c shutdown
 ```
 
-手机连接 `FR29-RTOS`，在同一个 GATT 特征值上开启 Notify，再以 Write Request 写入 UTF-8 文本 `FR29NT75`。验收以手机自动收到相同 8 字节和 J-Link 记录的板端通知为准。退出时脚本复位回原厂固件并核对 Flash 前 12 KiB。
+手机连接 `FR29-RTOS`，在同一个 GATT 特征值上开启 Notify，再以 Write Request 写入 UTF-8 文本 `FR29NT75-0123456789A`。验收以手机自动收到相同 20 字节和 J-Link 记录的板端通知为准。退出时脚本复位回原厂固件并核对 Flash 前 12 KiB。
 
 分别用 `ble-gatt-xip` 和 `ble-gatt-freertos,ble-gatt-xip` 构建 Flash 执行版，交给 `gatt_notify_memory.py compare <裸机 ELF> <FreeRTOS ELF>` 比较 Flash 负载和 SRAM 预留。栈用量取自 SRAM 实验的填充值覆盖深度。
 

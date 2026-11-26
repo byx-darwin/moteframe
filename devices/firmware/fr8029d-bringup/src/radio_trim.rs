@@ -36,6 +36,33 @@ pub enum TrimError {
 }
 
 impl RadioTrim {
+    /// Gain selector for both three-bit VCO modulation fields.
+    #[must_use]
+    pub const fn tx_kvco_fields(&self) -> u8 {
+        (self.kvco << 4) | self.kvco
+    }
+
+    /// Expand the v2 reference measurement into the FR8029D modem's
+    /// eight (1M, 2M) scale entries. Both banks use unsigned Q1.15 ratios.
+    pub fn tx_modulation_bands(&self) -> impl Iterator<Item = (u16, u16)> {
+        const RATIOS: [(u16, u16); 8] = [
+            (0x44fb, 0x87e0),
+            (0x4288, 0x830d),
+            (0x41f5, 0x81eb),
+            (0x40fb, 0x8000),
+            (0x40e8, 0x7fda),
+            (0x401c, 0x7e46),
+            (0x3f3c, 0x7c8d),
+            (0x3dc2, 0x79a6),
+        ];
+        let measured = u32::from(self.tx_modulation_scale);
+        RATIOS.into_iter().map(move |(one_m, two_m)| {
+            let scale =
+                |ratio| u16::try_from((measured * u32::from(ratio)) >> 15).unwrap_or(u16::MAX);
+            (scale(one_m), scale(two_m))
+        })
+    }
+
     /// Verifies and extracts the version-2 RF measurements.
     ///
     /// # Errors

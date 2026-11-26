@@ -11,6 +11,10 @@ pub use parameters::{
 };
 pub use queue::{OwnedQueue, QueueFull};
 
+mod data_length;
+#[cfg(feature = "data-length")]
+mod dle_queues;
+pub use data_length::DataLength;
 mod backend;
 mod controller;
 pub use backend::{Advertisement, LinkBackend, LinkEvent, Peer, TxAdmission};
@@ -20,6 +24,6 @@ mod event;
 mod hci;
 pub use command::CommandReply;
 pub use event::HciBuffer;
-#[cfg(feature = "external-wake")]
+#[cfg(any(feature = "external-wake", feature = "data-length"))]
 pub use hci::HciControllerRef;
 pub use hci::{HciController, HciError};

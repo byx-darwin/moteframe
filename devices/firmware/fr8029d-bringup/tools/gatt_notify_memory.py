@@ -7,9 +7,12 @@ import json
 from pathlib import Path
 import re
 import struct
+from zlib import crc32
+
+from pack_probe import APP_OFFSET, SECTOR_BYTES, validate_image
 
 
-APP_SRAM_START = 0x20003000
+APP_SRAM_START = 0x20001a00
 SRAM_END = 0x20018000
 FLASH_APP_START = 0x10002000
 FLASH_END = 0x10100000
@@ -234,6 +237,22 @@ def inspect_image(blob, *, xip):
     )
 
 
+def boot_image(stock, elf):
+    """Build the primary boot area and XIP application for this board."""
+    validate_image(stock)
+    if any(stock[SECTOR_BYTES:APP_OFFSET]):
+        raise ValueError("Active OTA metadata in the supplied board backup")
+    image = inspect_image(elf, xip=True)
+    payload = b"".join(data for _, data in image.loads)
+    prefix = bytearray(stock[:APP_OFFSET])
+    struct.pack_into("<I", prefix, 8, len(payload))
+    struct.pack_into("<I", prefix, 24, crc32(payload))
+    struct.pack_into("<I", prefix, 36, crc32(prefix[:36]))
+    result = bytes(prefix) + payload
+    validate_image(result + stock[len(result):])
+    return result
+
+
 def render_trial(image):
     lines = [
         "# Generated from the exact SRAM ELF. Source before gatt_notify_sram_trial.tcl.",
@@ -271,9 +290,13 @@ def observe_log(path, image):
         if label in observations or image.stacks.get(label, (0, -1))[1] != reserve or touched > reserve:
             raise ValueError(f"{path}: invalid {label} reservation or watermark")
         observations[label] = touched
+    notification_acked = bool(re.search(r"^NOTIFY_ACK SESSION=", blob, re.M))
     return {
         "last_session_stack_watermark_bytes": observations,
-        "board_notification_observed": bool(re.search(r"^PHONE_NOTIFICATION_VERIFIED ", blob, re.M)),
+        "board_notification_observed": notification_acked or bool(
+            re.search(r"^PHONE_NOTIFICATION_VERIFIED ", blob, re.M)
+        ),
+        "board_notification_acked": notification_acked,
         "tx_queue_drained": bool(re.search(r"^TX_QUEUE_CONFIRMED ", blob, re.M)),
         "stock_prefix_verified": "STOCK_RESTORED FLASH_PREFIX_BYTES=12288" in blob,
     }
@@ -321,6 +344,10 @@ def main():
     pack = subcommands.add_parser("pack", help="write checked SRAM load and measurement metadata")
     pack.add_argument("elf", type=Path)
     pack.add_argument("output", type=Path)
+    flash = subcommands.add_parser("flash-bin", help="package a checked XIP application at Flash offset zero")
+    flash.add_argument("stock", type=Path, help="full Flash backup from the same FR8029D")
+    flash.add_argument("elf", type=Path)
+    flash.add_argument("output", type=Path)
     diff = subcommands.add_parser("compare", help="compare XIP ELFs and optional SRAM trials")
     diff.add_argument("bare_xip", type=Path)
     diff.add_argument("rtos_xip", type=Path)
@@ -334,6 +361,11 @@ def main():
             with args.output.open("x", encoding="ascii") as output:
                 output.write(render_trial(image))
             print(f"{image.identity}: {image.payload_bytes} bytes at {image.vector:#x} ({image.digest})")
+        elif args.command == "flash-bin":
+            data = boot_image(args.stock.read_bytes(), args.elf.read_bytes())
+            with args.output.open("xb") as output:
+                output.write(data)
+            print(f"{len(data)} bytes, Flash offset 0, SHA-256 {sha256(data).hexdigest()}")
         else:
             print(json.dumps(compare(args), indent=2))
     except (OSError, ValueError) as error:

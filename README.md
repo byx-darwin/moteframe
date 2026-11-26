@@ -46,6 +46,8 @@ application + board adapters (separate from the portable crates)
 
 本仓库的独立设备工程提供 FR8029D 的裸机和 FreeRTOS 构建入口，直接引用这里的通用 crates。[设备工程](devices/README.md)
 
+FR8029D 裸机和 FreeRTOS 均可在构建时选择标准短包或最高 251 字节的 BLE 长包。两档都提供 20 字节回显和 SDK v0.3.6 的 FFF0 服务。[固件开关、打包命令与内存对比](devices/firmware/fr8029d-bringup/README.md#可选的-251-字节长包)
+
 ## 架构范围与平台适配
 
 MoteFrame 通过通用接口与芯片和板级实现衔接。当前固定的嵌入式验证目标为

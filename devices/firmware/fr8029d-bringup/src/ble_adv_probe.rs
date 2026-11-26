@@ -22,6 +22,9 @@ use fr8029d_bringup::{
     advertising::{CLOCK_MASK, SLOT_STRIDE, status_slot},
 };
 
+#[cfg(all(feature = "ble-gatt-board", not(feature = "ble-gatt-xip")))]
+global_asm!(include_str!("compact_memory.s"), options(raw));
+
 global_asm!(
     ".set __fr29_use_freertos, {freertos}",
     ".set __fr29_use_event_wake, {event_wake}",
@@ -132,7 +135,7 @@ fn diagnostic(index: usize, value: u32) {
     }
 }
 
-#[cfg(feature = "ble-gatt-board")]
+#[cfg(feature = "ble-connect-probe")]
 fn increment(index: usize) {
     // SAFETY: Each trace index has one producer on this core. IRQ counters
     // use separate indices from the foreground counters.
