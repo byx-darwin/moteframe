@@ -189,6 +189,11 @@ proc flash_trial {action original candidate ota helper} {
         require_sector 0x2000 [dict get $image 0x2000]
         require_sector 0x0 [dict get $image 0x0]
     }
+    # Words 55..63 are the MF01 tag and the SHA-256 of the entire backup.
+    set digest [dict get $original backup_digest]
+    set marker [linsert $digest 0 0x3130464d]
+    if {[llength $digest] != 8} { error "Invalid backup digest" }
+    verify_words "Package backup marker" [lrange [dict get $candidate 0x0] 55 63] $marker
     if {[word 0xe000ed00] != 0x410fd210} { error "CPU doesn't match the FR8029D board" }
     # Only a completed install rollback may reset on an error.
     set ::rollback_needed 1
@@ -233,11 +238,30 @@ proc flash_trial {action original candidate ota helper} {
         set header [read_sector 0]
         set app [read_sector 0x2000]
         if {$action eq "install"} {
+            set backup [dict get $original backup_file]
+            set file_digest [exec python3 -c {
+import hashlib, pathlib, struct, sys
+print(*struct.unpack("<8I", hashlib.sha256(pathlib.Path(sys.argv[1]).read_bytes()).digest()))
+} $backup]
+            verify_words "Installation backup SHA-256" $file_digest $digest
+            verify_image $backup 0x10000000 bin
             verify_words "Starting header" $header [dict get $original 0x0]
             verify_words "Starting application" $app [dict get $original 0x2000]
             set needs_write 1
         } else {
+            if {[lindex $header 55] == 0x3130464d} {
+                verify_words "Installed backup marker" [lrange $header 55 63] $marker
+            }
             set needs_write [restore_needed $app $header $original $candidate]
+            if {$needs_write && [lindex $header 55] != 0x3130464d} {
+                # Header not yet installed, or erased during restore. Only a
+                # retained witness from this powered transaction permits writing.
+                verify_words "Retained backup marker" [read_memory 0x20006f40 32 9] $marker
+            }
+        }
+        if {$needs_write} {
+            write_memory 0x20006f40 32 $marker
+            verify_words "Retained backup marker" [read_memory 0x20006f40 32 9] $marker
         }
         # Claim an already-unlocked device only after its sectors match this package.
         set reprotect [expr {$needs_write || $initial_sr1 != 0x7c}]
@@ -281,6 +305,7 @@ proc flash_trial {action original candidate ota helper} {
         write_memory 0x20006f00 32 {0 0 0 0 0 0 0 0}
         echo "FLASH_PROBE_WRITTEN_AND_PROTECTED"
     } else {
+        write_memory 0x20006f40 32 [lrepeat 9 0]
         echo "FLASH_ORIGINAL_WRITTEN_AND_PROTECTED"
     }
     reset run

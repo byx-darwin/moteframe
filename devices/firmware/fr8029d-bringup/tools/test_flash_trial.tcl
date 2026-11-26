@@ -31,6 +31,12 @@ proc burn_sector {offset words} {
 }
 set stock [dict create 0x2000 [lrepeat 1024 0x1234] 0x0 [lrepeat 1024 0x1234]]
 set candidate [dict create 0x2000 [lrepeat 1024 0xcafe] 0x0 [lrepeat 1024 0xcafe]]
+dict set stock backup_digest [lrepeat 8 0x1234]
+dict set stock backup_file mock.bin
+dict set candidate 0x0 [lreplace [dict get $candidate 0x0] 55 63 0x3130464d {*}[dict get $stock backup_digest]]
+proc verify_image {file address format} {
+    check {$file eq "mock.bin" && $address == 0x10000000 && $format eq "bin"}
+}
 set attempts {}
 set inject_error 0
 write_pair $candidate
@@ -114,6 +120,7 @@ proc word {address} {
 }
 proc read_sector {offset} { return $::sectors([format %d $offset]) }
 proc write_memory {address width data} {
+    if {$address == 0x20006f40} { set ::witness $data; return }
     check {$address == 0x20003000}
     set ::helper_ram $data
 }
@@ -122,6 +129,7 @@ proc read_memory {address width count} {
         0xe00a4000 { return {0x80890087 0x0802006b 2 0x08000404 5 0x00101002 0 0 0 0} }
         0xe00a4050 { return {0 0 0} }
         0x20003000 { return $::helper_ram }
+        0x20006f40 { return $::witness }
         0xe000ed08 { return {0x10002000} }
         0x10002000 { return [lrange $::sectors(8192) 0 1] }
         default { error "unexpected memory read $address" }
@@ -150,6 +158,7 @@ proc start_trial {app header} {
     set ::fail_page -1
     set ::fail_reprotect 0
     set ::core_state running
+    set ::witness [linsert [dict get $::stock backup_digest] 0 0x3130464d]
     set ::polled_state unknown
     set ::fail_poll 0
     set ::fail_resume 0
@@ -300,4 +309,37 @@ foreach {app matches} [list $unknown 0 $probe_app 1] {
         check {$sectors(8192) eq $app && $sectors(0) eq $probe_header}
     }
 }
+# First WREN, both installed sectors still contain the probe. Two internally
+# consistent packages differ only in backup identity on their candidate side.
+start_trial $probe_app $probe_header
+set sr1 0
+stig 0x06000000
+set other_stock $stock
+dict set other_stock backup_digest [lrepeat 8 0xabcd]
+dict set other_stock 0x2000 [lreplace $stock_app 10 10 0x0123]
+set other_candidate $candidate
+dict set other_candidate 0x0 [lreplace $probe_header 56 63 {*}[dict get $other_stock backup_digest]]
+check {[catch {flash_trial restore $other_stock $other_candidate $ota $helper} msg]}
+check {[string match {*Installed backup marker*} $msg]}
+check {$erases eq {} && $protections eq {} && $wel == 2 && $resets == 0}
+check {$sectors(8192) eq $probe_app && $sectors(0) eq $probe_header}
+trial restore
+check {$sectors(8192) eq $stock_app && $sectors(0) eq $stock_header}
+check {$erases eq {8192 0} && $sr1 == 0x7c && !$wel && $resets == 1}
 puts "Interrupted restore, idempotence and preflight guards passed."
+
+# Second WREN: application already restored, header still carries the tag.
+start_trial $stock_app $probe_header
+set sr1 0
+stig 0x06000000
+check {[catch {flash_trial restore $other_stock $other_candidate $ota $helper}]}
+check {$erases eq {} && $wel == 2 && $protections eq {}}
+trial restore
+check {$erases eq {0} && $sectors(0) eq $stock_header && $sr1 == 0x7c}
+
+# A header erase also removes the Flash marker; refuse ambiguous writes if
+# power loss has removed the transaction's SRAM witness.
+start_trial $stock_app $partial
+set witness [lrepeat 9 0]
+check {[catch {trial restore} msg] && [string match {*Retained backup marker*} $msg]}
+check {$erases eq {} && $protections eq {} && $resets == 0}

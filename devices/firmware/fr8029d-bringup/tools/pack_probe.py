@@ -108,6 +108,11 @@ def build_package(stock, elf):
         raise ValueError("The OTA metadata sector differs from the empty sector in the capture")
     payload = extract_probe(elf)
     header = bytearray(stock[:SECTOR_BYTES])
+    # Reserve the end of the first boot-header page, outside the ROM fields.
+    marker = b"MF01" + sha256(stock).digest()
+    if header[220:256] != b"\xff" * len(marker):
+        raise ValueError("Backup marker area is occupied")
+    header[220:256] = marker
     struct.pack_into("<I", header, 8, len(payload))
     struct.pack_into("<I", header, 24, crc32(payload))
     struct.pack_into("<I", header, 36, crc32(header[:36]))

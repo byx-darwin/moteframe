@@ -62,6 +62,11 @@ def prepare(original_path, elf_path, package, helper_path):
         app = tcl_words(image[APP_OFFSET:APP_OFFSET + SECTOR_BYTES])
         header = tcl_words(image[:SECTOR_BYTES])
         lines.append(f"set {name} [dict create 0x2000 {app} 0x0 {header}]")
+    # Quote the retained backup path as a literal Tcl string.
+    path = str(original_path.resolve())
+    quoted = "".join(("\\" + ch) if ch in '\\"$[]' else ch for ch in path)
+    lines.append(f'dict set original backup_file "{quoted}"')
+    lines.append("dict set original backup_digest " + tcl_words(sha256(original).digest()))
     lines.append("set ota " + tcl_words(original[SECTOR_BYTES:APP_OFFSET]))
     lines.append("set helper " + tcl_words(load_page_helper(helper_path.read_bytes())))
     return "\n".join(lines) + "\n"

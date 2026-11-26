@@ -1,4 +1,5 @@
 """Offline tests for the FR8029D probe package and its restoration plan."""
+from hashlib import sha256
 import struct
 import unittest
 import zlib
@@ -51,6 +52,17 @@ class PackageTests(unittest.TestCase):
             self.assertEqual(candidate[patch.offset:patch.offset + 4096], patch.replacement)
             restored[patch.offset:patch.offset + 4096] = patch.original
         self.assertEqual(restored, stock)
+
+    def test_header_binds_same_probe_to_full_backup(self):
+        first = make_stock()
+        second = first[:-1] + bytes([first[-1] ^ 1])
+        for backup in (first, second):
+            image, _ = build_package(backup, make_elf())
+            self.assertEqual(image[220:256], b"MF01" + sha256(backup).digest())
+        occupied = bytearray(first)
+        occupied[220] = 0
+        with self.assertRaisesRegex(ValueError, "marker"):
+            build_package(occupied, make_elf())
 
     def test_rejects_corrupt_header_or_stock_payload(self):
         for offset in (36, 0x2020):
