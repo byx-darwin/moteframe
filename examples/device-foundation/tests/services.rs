@@ -5,7 +5,7 @@ use moteframe_device_foundation::{
     model::{LinkModel, Target},
     services::ServiceReport,
 };
-use moteframe_input::{ButtonConfig, TouchConfig};
+use moteframe_input::{ButtonConfig, Point, TouchConfig, TouchSample};
 
 fn services() -> Services<LinkModel> {
     services_in_generation(core::num::NonZeroU64::MIN)
@@ -137,6 +137,57 @@ fn input_pressure_retains_samples_and_later_processes_each_press_once() {
     assert_eq!(s.processed_samples(), 40);
     assert_eq!(s.processed_events(), 40);
     assert_eq!(s.snapshot().selection, 0); // twenty presses modulo four
+}
+
+#[test]
+fn mixed_button_and_touch_actions_follow_sample_order() {
+    let press = Sample::Button {
+        pressed: true,
+        at_us: 100,
+    };
+    let hold = Sample::TouchTick(100);
+    for (last_two, expected) in [([press, hold], [1, 1, 2, 0]), ([hold, press], [1, 1, 0, 1])] {
+        let samples = [
+            Sample::Touch {
+                sample: TouchSample::Down(Point { x: 1, y: 1 }),
+                at_us: 0,
+            },
+            Sample::Button {
+                pressed: true,
+                at_us: 1,
+            },
+            Sample::Button {
+                pressed: false,
+                at_us: 2,
+            },
+            last_two[0],
+            last_two[1],
+        ];
+        let mut s = services();
+        let mut next = 0;
+        let mut selections = Vec::new();
+        for _ in 0..20 {
+            while let Some(&sample) = samples.get(next) {
+                match s.enqueue_input(sample) {
+                    Ok(()) => next += 1,
+                    Err(EnqueueError::Full) => break,
+                    Err(error) => panic!("unexpected {error:?}"),
+                }
+            }
+            let report = round(&mut s);
+            assert!(report.samples <= 1 && report.events <= 1);
+            assert_eq!(report.rejected, 0);
+            if report.events == 1 {
+                selections.push(s.snapshot().selection);
+            }
+            if next == samples.len() && s.queued_inputs() == 0 {
+                break;
+            }
+        }
+        assert_eq!(s.processed_samples(), 5);
+        assert_eq!(s.queued_inputs(), 0);
+        assert_eq!(selections, expected);
+    }
 }
 
 #[test]

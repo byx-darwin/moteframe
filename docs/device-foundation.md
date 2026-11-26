@@ -42,8 +42,8 @@ opcode, service UUID, sensor calculation or product page.
   Every successful tile adds one service round. A frame uses one copied snapshot;
   tile callbacks post future invalidation without modifying current-frame pixels.
 - One round calls poll once, receives at most one complete value, attempts one
-  retained notification, processes one retained/raw sample and consumes one
-  recognized event. Button/touch event queues alternate including empty turns.
+  retained notification and processes at most one retained/raw sample. It consumes
+  the resulting button or touch event in the same round, preserving enqueue order.
   Adapters supply finite I/O budgets; the example cannot promise radio latency.
 - Local Full never overwrites existing bytes/samples. Recognized queue Full retains
   the same popped raw sample and timestamp. Other malformed input is reported and
@@ -112,7 +112,7 @@ The maintained `make device-foundation` gate reports current Cortex-M33 measurem
 The small profile removes 208 bytes from these owners and 532 bytes from this
 linked synthetic consumer. The workload frame includes construction/temporary
 costs and is larger than the owned layouts; do not interpret a zero static `.bss`
-as zero RAM usage. Each profile passes 23 behavior tests and eight executed probe
+as zero RAM usage. Each profile passes 24 behavior tests and eight executed probe
 seeds. The seed-zero replay processes 16 samples/events, accepts 16 notifications,
 receives 16 committed values and recovers three explicit fault paths. Full final
 PPM SHA-256: `916efc21c034107a648a5fdc9b5765f4aa1d120e54ef3674b7f3c0e11bec86a2`.

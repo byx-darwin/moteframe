@@ -23,7 +23,9 @@ jobs:
         run: rustup show
       - name: Check FR8029D host and bare-metal build
         run: |
+          cargo test --locked --manifest-path devices/Cargo.toml --workspace
           cargo test --locked --manifest-path devices/firmware/fr8029d-bringup/Cargo.toml --features ble-gatt-probe
+          cargo test --locked --manifest-path devices/firmware/fr8029d-bringup/Cargo.toml --features ble-gatt-probe,ble-gatt-event-driven
           cargo build --locked --release --manifest-path devices/firmware/fr8029d-bringup/Cargo.toml --target thumbv8m.main-none-eabi --features ble-gatt-board --bin fr8029d-ble-adv
       - name: Check optional data length and the SDK GATT profile
         run: |
@@ -38,3 +40,32 @@ jobs:
           cargo build --locked --release --manifest-path devices/firmware/fr8029d-bringup/Cargo.toml --target thumbv8m.main-none-eabi --features ble-gatt-freertos,ble-gatt-xip --bin fr8029d-ble-adv
           cargo build --locked --release --manifest-path devices/firmware/fr8029d-bringup/Cargo.toml --target thumbv8m.main-none-eabi --features ble-gatt-freertos,ble-gatt-xip,ble-gatt-event-driven,ble-gatt-dle --bin fr8029d-ble-adv
           cargo build --locked --release --manifest-path devices/firmware/fr8029d-bringup/Cargo.toml --target thumbv8m.main-none-eabi --features ble-gatt-freertos,ble-gatt-xip,ble-gatt-dle --bin fr8029d-ble-adv
+      - name: Validate standard event-driven SRAM images and interrupt vectors
+        working-directory: devices/firmware/fr8029d-bringup
+        run: |
+          while read -r runtime identity; do
+            cargo build --locked --release --target thumbv8m.main-none-eabi --features "$runtime,ble-gatt-event-driven" --bin fr8029d-ble-adv
+            python3 tools/gatt_notify_memory.py pack target/thumbv8m.main-none-eabi/release/fr8029d-ble-adv "$RUNNER_TEMP/$runtime.tcl"
+            grep -Fxq 'set notify_event_driven 1' "$RUNNER_TEMP/$runtime.tcl"
+            grep -Fxq "set notify_identity $identity" "$RUNNER_TEMP/$runtime.tcl" || {
+              echo "Expected $identity in the $runtime image" >&2
+              exit 1
+            }
+          done <<'IMAGES'
+          ble-gatt-board FR29-GAT2
+          ble-gatt-freertos FR29-RTOS
+          IMAGES
+      - name: Test Flash recovery and SRAM acceptance tools offline
+        working-directory: devices/firmware/fr8029d-bringup/tools
+        run: |
+          tclsh test_flash_trial.tcl
+          python3 -m unittest discover
+
+  mac-probe-regression:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Test Bluetooth acceptance tools offline
+        run: |
+          swift -D BLE_CONNECT_TESTS devices/scripts/ble_connect.swift
+          swift -D BLE_SDK_COMPAT_TESTS devices/scripts/ble_sdk_compat.swift

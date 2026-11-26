@@ -4,10 +4,15 @@
 
 use core::convert::Infallible;
 
-use embedded_graphics::{pixelcolor::PixelColor, prelude::*, primitives::Rectangle};
+use embedded_graphics::{
+    image::{Image, ImageDrawable},
+    pixelcolor::PixelColor,
+    prelude::*,
+    primitives::Rectangle,
+};
 use moteframe_core::{Dimensions as DisplaySize, Display, Rect};
 
-use crate::geometry::{clip, contiguous_pixels, visible};
+use crate::geometry::{clip, visible};
 
 /// Constant-memory union of invalidated rectangles for one logical display size.
 #[derive(Clone, Copy, Debug)]
@@ -94,9 +99,26 @@ impl<C> Dimensions for Tile<'_, C> {
 }
 
 impl<C> Tile<'_, C> {
-    fn intersection(&self, area: Rectangle) -> Option<Rect> {
+    /// Borrows the visible part of an image row for direct decoding into tile storage.
+    ///
+    /// `area` positions the image in scene coordinates. Returns the starting
+    /// column and row relative to its top-left corner and the corresponding
+    /// destination pixels, or `None` when the image misses this tile.
+    pub fn row_span_mut(&mut self, area: &Rectangle) -> Option<(u32, u32, &mut [C])> {
+        let visible = self.intersection(area)?;
+        let column = area.top_left.x.abs_diff(i32::from(visible.x));
+        let row = area.top_left.y.abs_diff(i32::from(visible.y));
+        let start = usize::from(visible.x - self.area.x);
+        Some((
+            column,
+            row,
+            &mut self.pixels[start..start + usize::from(visible.width)],
+        ))
+    }
+
+    fn intersection(&self, area: &Rectangle) -> Option<Rect> {
         let clipped = clip(
-            area,
+            *area,
             DisplaySize::new(self.area.x + self.area.width, self.area.y + 1),
         )?;
         let left = clipped.x.max(self.area.x);
@@ -105,6 +127,36 @@ impl<C> Tile<'_, C> {
             return None;
         }
         Some(Rect::new(left, self.area.y, right - left, 1))
+    }
+}
+
+impl<C: PixelColor> Tile<'_, C> {
+    /// Draws the visible part of an image positioned at `top_left` in scene coordinates.
+    ///
+    /// Calls the decoder's sub-image path with a single row span. An `ImageRaw`
+    /// seeks to that span before converting pixels. Other formats determine their
+    /// own sub-image decoding cost. Virtual source offsets beyond the signed
+    /// `Point` range fall back to ordinary image drawing.
+    /// # Errors
+    /// The tile's drawing error is infallible.
+    pub fn draw_image(
+        &mut self,
+        image: &impl ImageDrawable<Color = C>,
+        top_left: Point,
+    ) -> Result<(), Infallible> {
+        let Some(visible) = self.intersection(&Rectangle::new(top_left, image.size())) else {
+            return Ok(());
+        };
+        let origin = Point::new(i32::from(visible.x), i32::from(visible.y));
+        let (Some(column), Some(row)) = (
+            origin.x.checked_sub(top_left.x),
+            origin.y.checked_sub(top_left.y),
+        ) else {
+            return Image::new(image, top_left).draw(self);
+        };
+        let size = Size::new(u32::from(visible.width), 1);
+        let source = Rectangle::new(Point::new(column, row), size);
+        image.draw_sub_image(&mut self.cropped(&Rectangle::new(origin, size)), &source)
     }
 }
 
@@ -132,16 +184,30 @@ impl<C: PixelColor> DrawTarget for Tile<'_, C> {
     where
         I: IntoIterator<Item = C>,
     {
-        if self.intersection(*area).is_some() {
-            self.draw_iter(contiguous_pixels(*area, colors))?;
+        let Some((column, row, output)) = self.row_span_mut(area) else {
+            return Ok(());
+        };
+        let mut offset = u64::from(row) * u64::from(area.size.width) + u64::from(column);
+        let mut colors = colors.into_iter();
+        // On narrow targets an enormous virtual image can exceed one usize-sized seek.
+        let skip = loop {
+            if let Ok(skip) = usize::try_from(offset) {
+                break skip;
+            }
+            if colors.nth(usize::MAX).is_none() {
+                return Ok(());
+            }
+            offset = offset - usize::MAX as u64 - 1;
+        };
+        for (pixel, color) in output.iter_mut().zip(colors.skip(skip)) {
+            *pixel = color;
         }
         Ok(())
     }
 
     fn fill_solid(&mut self, area: &Rectangle, color: C) -> Result<(), Self::Error> {
-        if let Some(clipped) = self.intersection(*area) {
-            let start = usize::from(clipped.x - self.area.x);
-            self.pixels[start..start + usize::from(clipped.width)].fill(color);
+        if let Some((_, _, output)) = self.row_span_mut(area) {
+            output.fill(color);
         }
         Ok(())
     }

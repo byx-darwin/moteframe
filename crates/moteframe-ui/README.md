@@ -57,6 +57,38 @@ against the interval; clock regression reports an error and starts a new epoch.
 `StreamTarget::<_, 8>::with_run`; invalid capacities fail compilation. RUN and
 refresh tile limits are independent; smaller tile limits do not shrink arrays.
 
+### Drawing images with small scratch buffers
+
+For an embedded-graphics `ImageRaw`, pass the decoder and its scene position
+to `Tile::draw_image` inside the repaint closure. For example, with an
+`Rgb565` display and an `ImageRaw<Rgb565>` named `logo`:
+
+```rust
+repaint(display, &mut dirty, scratch, Rgb565::BLACK, |tile| {
+    tile.draw_image(&logo, Point::new(12, 8))
+})?;
+```
+
+The helper asks the decoder for the part of one source row that overlaps the
+current tile. `ImageRaw` jumps to those pixels before color conversion. A
+240 × 240 image drawn this way needs 57,600 conversions with either 8 or 32
+scratch pixels. Other `ImageDrawable` formats control the cost of reading a
+sub-image. Source offsets beyond the signed `Point` range use ordinary image
+drawing. The existing `Image::new(&logo, position).draw(tile)` also uses
+ordinary drawing and can convert the prefix again on every overlapping tile.
+
+`Tile::fill_contiguous` seeks to the first visible row-major pixel and consumes
+the intersecting span. An iterator with a constant-time `nth`, such as
+`colors.iter().copied()` over a pixel slice, can jump over the prefix. A
+forward-only decoder still processes the prefix for every overlapping tile.
+
+For an external image, `tile.row_span_mut(&image_area)` supplies the source
+column, source row and destination slice. Pass them to
+`moteframe_assets::Raster::read_span` with the reader and byte scratch. The
+decoder then reads only the intersecting pixels directly into the tile. The
+[assets/UI integration test](../moteframe-assets/tests/ui.rs) shows the full
+draw closure, including how a read error reaches the repaint caller.
+
 See [design](../../docs/ui-configuration.md) and
 [implementation evidence](../../docs/ui-configuration-implementation.md).
 `make ui-config` verifies feature consumers, rejected ownership/API uses, ARM

@@ -4,23 +4,28 @@
 
 //! Partial redraw behavior using actual rasterization into caller storage.
 #![cfg(feature = "refresh")]
-use core::convert::Infallible;
+use core::{cell::Cell, convert::Infallible};
 use graphics::{
+    geometry::Dimensions as _,
+    image::ImageRaw,
     pixelcolor::Rgb565,
     prelude::*,
     primitives::{PrimitiveStyle, Rectangle},
 };
 use moteframe_core::{Dimensions, Display, Rect};
-use moteframe_ui::graphics::pixelcolor::{Rgb565 as Packed, raw::RawU16};
+use moteframe_ui::graphics::pixelcolor::{
+    Rgb565 as Packed,
+    raw::{RawU8, RawU16},
+};
 use moteframe_ui::{DirtyRegion, RefreshError, graphics, repaint};
 
 #[derive(Debug)]
-struct Screen {
+struct Screen<C = Packed> {
     size: Dimensions,
-    writes: Vec<(Rect, Vec<Packed>)>,
+    writes: Vec<(Rect, Vec<C>)>,
     fail_at: Option<usize>,
 }
-impl Screen {
+impl<C> Screen<C> {
     fn new(width: u16, height: u16) -> Self {
         Self {
             size: Dimensions::new(width, height),
@@ -29,13 +34,13 @@ impl Screen {
         }
     }
 }
-impl Display for Screen {
-    type Color = Packed;
+impl<C: Copy> Display for Screen<C> {
+    type Color = C;
     type Error = &'static str;
     fn dimensions(&self) -> Dimensions {
         self.size
     }
-    fn write(&mut self, rect: Rect, pixels: &[Packed]) -> Result<(), Self::Error> {
+    fn write(&mut self, rect: Rect, pixels: &[C]) -> Result<(), Self::Error> {
         assert!(rect.fits(self.size));
         assert_eq!(usize::try_from(rect.area()), Ok(pixels.len()));
         if self.fail_at == Some(self.writes.len()) {
@@ -44,6 +49,84 @@ impl Display for Screen {
         self.writes.push((rect, pixels.to_vec()));
         Ok(())
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct CountedColor(u8);
+
+thread_local! {
+    static CONVERSIONS: Cell<u32> = const { Cell::new(0) };
+}
+
+impl PixelColor for CountedColor {
+    type Raw = RawU8;
+}
+
+impl From<RawU8> for CountedColor {
+    fn from(raw: RawU8) -> Self {
+        CONVERSIONS.set(CONVERSIONS.get() + 1);
+        Self(raw.into_inner())
+    }
+}
+
+#[test]
+fn raw_image_decodes_each_visible_pixel_once() -> Result<(), RefreshError<&'static str, Infallible>>
+{
+    let bytes: Vec<_> = (0..=u8::MAX).cycle().take(240 * 240).collect();
+    let image = ImageRaw::<CountedColor>::new(&bytes, 240);
+    for capacity in [8, 32] {
+        let mut screen = Screen::new(240, 240);
+        let mut dirty = DirtyRegion::new(screen.size);
+        dirty.invalidate_all();
+        CONVERSIONS.set(0);
+        repaint(
+            &mut screen,
+            &mut dirty,
+            &mut vec![CountedColor(0); capacity],
+            CountedColor(0),
+            |tile| tile.draw_image(&image, Point::zero()),
+        )?;
+        assert_eq!(CONVERSIONS.get(), 57_600, "capacity {capacity}");
+        assert!(
+            screen
+                .writes
+                .iter()
+                .flat_map(|(_, colors)| colors.iter().map(|c| c.0))
+                .eq(bytes.iter().copied())
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn raw_image_clips_source_and_preserves_surrounding_tile_pixels()
+-> Result<(), RefreshError<&'static str, Infallible>> {
+    let image = ImageRaw::<CountedColor>::new(&[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], 4);
+    let mut screen = Screen::new(8, 2);
+    let mut dirty = DirtyRegion::new(screen.size);
+    dirty.invalidate(Rectangle::new(Point::new(1, 1), Size::new(7, 1)));
+    CONVERSIONS.set(0);
+    repaint(
+        &mut screen,
+        &mut dirty,
+        &mut [CountedColor(0); 4],
+        CountedColor(99),
+        |tile| {
+            tile.draw_image(&image, Point::new(-1, -1))?;
+            tile.draw_image(&image, Point::new(4, 1))?;
+            tile.draw_image(&image, Point::new(i32::MAX, 0))
+        },
+    )?;
+    assert_eq!(CONVERSIONS.get(), 6);
+    assert_eq!(
+        screen.writes[0].1.iter().map(|c| c.0).collect::<Vec<_>>(),
+        [11, 12, 99, 1]
+    );
+    assert_eq!(
+        screen.writes[1].1.iter().map(|c| c.0).collect::<Vec<_>>(),
+        [2, 3, 4]
+    );
+    Ok(())
 }
 
 #[test]
@@ -264,4 +347,131 @@ fn test_should_clip_extreme_tile_fill_inputs_without_panicking() {
             vec![Packed::from(RawU16::new(0x07e0)); 2]
         )]
     );
+}
+
+// An indexed decoder can jump its input cursor before decoding a color.
+struct IndexedColors<I, F>(I, F);
+
+impl<I: Iterator, F: FnMut(I::Item) -> Packed> Iterator for IndexedColors<I, F> {
+    type Item = Packed;
+
+    fn next(&mut self) -> Option<Packed> {
+        self.0.next().map(&mut self.1)
+    }
+
+    fn nth(&mut self, n: usize) -> Option<Packed> {
+        self.0.nth(n).map(&mut self.1)
+    }
+}
+
+#[test]
+fn seekable_contiguous_image_decodes_each_visible_pixel_once()
+-> Result<(), RefreshError<&'static str, Infallible>> {
+    const WIDTH: u16 = 240;
+    const PIXELS: u16 = WIDTH * WIDTH;
+    let area = Rectangle::new(Point::zero(), Size::new(240, 240));
+    for (capacity, expected_tiles) in [(8, 7_200), (32, 1_920)] {
+        let mut screen = Screen::new(WIDTH, WIDTH);
+        let mut dirty = DirtyRegion::new(screen.size);
+        dirty.invalidate_all();
+        let mut scratch = vec![Rgb565::BLACK; capacity];
+        let mut decoded = 0;
+        repaint(
+            &mut screen,
+            &mut dirty,
+            &mut scratch,
+            Rgb565::BLACK,
+            |tile| {
+                let before = decoded;
+                let colors = IndexedColors(0..PIXELS, |value| {
+                    decoded += 1;
+                    Packed::from(RawU16::new(value))
+                });
+                tile.fill_contiguous(&area, colors)?;
+                assert_eq!(decoded - before, tile.bounding_box().size.width);
+                Ok(())
+            },
+        )?;
+        assert_eq!(decoded, u32::from(PIXELS));
+        assert_eq!(screen.writes.len(), expected_tiles);
+        let mut expected = (0..PIXELS).map(|value| Packed::from(RawU16::new(value)));
+        for (_, pixels) in screen.writes {
+            for pixel in pixels {
+                assert_eq!(Some(pixel), expected.next());
+            }
+        }
+        assert_eq!(expected.next(), None);
+    }
+    Ok(())
+}
+
+#[test]
+fn forward_only_contiguous_source_stops_at_tile_edge_or_end()
+-> Result<(), RefreshError<&'static str, Infallible>> {
+    let mut screen = Screen::new(4, 1);
+    let mut dirty = DirtyRegion::new(screen.size);
+    dirty.invalidate_all();
+    let mut consumed = 0;
+    repaint(
+        &mut screen,
+        &mut dirty,
+        &mut [Rgb565::BLACK; 4],
+        Rgb565::BLACK,
+        |tile| {
+            let area = Rectangle::new(Point::new(-1, -1), Size::new(8, 3));
+            let colors = core::iter::from_fn(|| {
+                consumed += 1;
+                Some(Packed::from(RawU16::new(consumed)))
+            });
+            tile.fill_contiguous(&area, colors)?;
+            tile.fill_contiguous(
+                &Rectangle::new(Point::new(1, 0), Size::new(4, 1)),
+                [Rgb565::WHITE],
+            )?;
+            tile.fill_contiguous(
+                &Rectangle::new(Point::new(4, 0), Size::new(2, 1)),
+                core::iter::from_fn(|| panic!("off-screen source accessed")),
+            )
+        },
+    )?;
+    assert_eq!(consumed, 13);
+    assert_eq!(
+        screen.writes[0].1,
+        [
+            Packed::from(RawU16::new(10)),
+            Rgb565::WHITE,
+            Packed::from(RawU16::new(12)),
+            Packed::from(RawU16::new(13))
+        ]
+    );
+    Ok(())
+}
+
+#[test]
+#[cfg(target_pointer_width = "64")]
+fn contiguous_image_seeks_to_extreme_signed_origin_without_overflow()
+-> Result<(), RefreshError<&'static str, Infallible>> {
+    let mut screen = Screen::new(2, 1);
+    let mut dirty = DirtyRegion::new(screen.size);
+    dirty.invalidate_all();
+    let area = Rectangle::new(
+        Point::new(i32::MIN, i32::MIN),
+        Size::new(u32::MAX, u32::MAX),
+    );
+    repaint(
+        &mut screen,
+        &mut dirty,
+        &mut [Rgb565::BLACK; 2],
+        Rgb565::BLACK,
+        |tile| {
+            // The first visible pixel is exactly 2^63 positions into this virtual image.
+            let source = IndexedColors(0..(1_u64 << 63) + 1, |index| {
+                assert_eq!(index, 1 << 63);
+                Rgb565::GREEN
+            });
+            tile.fill_contiguous(&area, source)
+        },
+    )?;
+    assert_eq!(screen.writes[0].1, [Rgb565::GREEN, Rgb565::BLACK]);
+    Ok(())
 }

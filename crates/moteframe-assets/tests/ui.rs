@@ -1,10 +1,10 @@
 //! Real assets/storage/UI composition with separate metadata and mutable reader.
 #![allow(clippy::unwrap_used)] // Assertions turn any unexpected fixture error into a failed test.
 use core::num::NonZeroU32;
-use embedded_graphics_core::geometry::Dimensions as _;
 use embedded_graphics_core::{
     pixelcolor::{Gray8, GrayColor},
     prelude::*,
+    primitives::Rectangle,
 };
 use moteframe_assets::{AssetError, DecodeError, Gray8Bytes, PixelFormat, Raster};
 use moteframe_core::{Dimensions, Display, ReadAt, Rect};
@@ -69,16 +69,21 @@ fn draw<F: PixelFormat<Color = Gray8>>(
         DisplayBinding::new(screen, 1),
         view,
         |tile, ctx| {
-            let rect = tile.bounding_box();
-            let mut output = [Gray8::new(0); 2];
-            let mut bytes = [0; 1];
-            let count = usize::try_from(rect.size.width).map_err(|_| AssetError::Bounds)?;
-            let x = u16::try_from(rect.top_left.x).map_err(|_| AssetError::Bounds)?;
-            let y = u16::try_from(rect.top_left.y).map_err(|_| AssetError::Bounds)?;
-            ctx.resources()
-                .read_span(reader, x, y, &mut output[..count], &mut bytes)?;
-            tile.fill_contiguous(&rect, output[..count].iter().copied())
-                .map_err(|never| match never {})
+            let raster = ctx.resources();
+            let image = Rectangle::new(
+                Point::zero(),
+                Size::new(u32::from(raster.width()), u32::from(raster.height())),
+            );
+            if let Some((x, y, output)) = tile.row_span_mut(&image) {
+                raster.read_span(
+                    reader,
+                    u16::try_from(x).map_err(|_| AssetError::Bounds)?,
+                    u16::try_from(y).map_err(|_| AssetError::Bounds)?,
+                    output,
+                    &mut [0; 1],
+                )?;
+            }
+            Ok(())
         },
         |_| Ok(()),
     )

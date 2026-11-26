@@ -25,9 +25,10 @@ frame; events arriving between tiles request only the next frame.
 
 Services run before/after every frame attempt, including Idle, pacing or errors,
 and after each successful tile. Each round polls once, receives at most one whole
-value, attempts at most one pending notification, processes one raw sample and
-consumes one recognized event (alternating button/touch). Adapters must separately
-bound their operation time. Logical work counts are not real-time guarantees.
+value, attempts at most one pending notification and processes at most one raw
+sample. It consumes any resulting button or touch event before processing the
+next sample, preserving enqueue order even at equal timestamps. Adapters must
+separately bound their operation time. Logical work counts are not real-time guarantees.
 
 The caller retains any sample/value rejected by local Full. The service owner
 retains a popped sample when a recognized event queue fills. A notification retry

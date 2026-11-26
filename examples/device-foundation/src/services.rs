@@ -210,7 +210,6 @@ pub struct Services<B: Link> {
     touch: Touch,
     buttons: EventQueue<ButtonEvent, INPUT_EVENTS>,
     touches: EventQueue<TouchEvent, INPUT_EVENTS>,
-    touch_turn: bool,
     snapshot: Snapshot,
     damage: Damage,
     total_samples: u32,
@@ -251,7 +250,6 @@ impl<B: Link> Services<B> {
             touch: Touch::new(touch),
             buttons: EventQueue::new(),
             touches: EventQueue::new(),
-            touch_turn: false,
             snapshot: Snapshot::default(),
             damage: Damage::default(),
             total_samples: 0,
@@ -472,41 +470,30 @@ impl<B: Link> Services<B> {
         }
     }
     fn events(&mut self, report: &mut ServiceReport<B::Error>) {
-        let mut delta = 0u8;
-        let mut reset = false;
-        let consumed = if self.touch_turn {
-            self.touches
-                .pop()
-                .map(|e| match e {
-                    TouchEvent::Tap(_) | TouchEvent::Swipe(Direction::Right | Direction::Down) => {
-                        delta = 1;
-                    }
-                    TouchEvent::Swipe(Direction::Left | Direction::Up) => delta = 3,
-                    TouchEvent::Held(_) => reset = true,
-                    _ => {}
-                })
-                .is_some()
+        // Each raw sample produces at most one event. Draining it in this round
+        // keeps both queues empty at the boundary before the next sample.
+        let current = self.snapshot.selection;
+        let selected = if let Some(event) = self.buttons.pop() {
+            if event == ButtonEvent::Pressed {
+                (current + 1) % 4
+            } else {
+                current
+            }
+        } else if let Some(event) = self.touches.pop() {
+            match event {
+                TouchEvent::Tap(_) | TouchEvent::Swipe(Direction::Right | Direction::Down) => {
+                    (current + 1) % 4
+                }
+                TouchEvent::Swipe(Direction::Left | Direction::Up) => (current + 3) % 4,
+                TouchEvent::Held(_) => 0,
+                _ => current,
+            }
         } else {
-            self.buttons
-                .pop()
-                .map(|e| {
-                    if e == ButtonEvent::Pressed {
-                        delta = 1;
-                    }
-                })
-                .is_some()
+            return;
         };
-        self.touch_turn = !self.touch_turn;
-        if consumed {
-            report.events = report.events.saturating_add(1);
-            self.total_events = self.total_events.saturating_add(1);
-        }
-        let selected = if reset {
-            0
-        } else {
-            (self.snapshot.selection + delta) % 4
-        };
-        if selected != self.snapshot.selection {
+        report.events = report.events.saturating_add(1);
+        self.total_events = self.total_events.saturating_add(1);
+        if selected != current {
             self.snapshot.selection = selected;
             self.damage.full = true;
         }

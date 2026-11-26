@@ -40,6 +40,10 @@ OpenOCD 通过 J-Link 操作 QSPI 控制器，并在 SRAM 运行 `tools/program_
 
 离线输入可用 `xcrun clang --target=thumbv8m.main-none-eabi -mcpu=cortex-m33 -c tools/program_flash_page.s` 构建页写入目标文件，再用 `python3 -B tools/prepare_flash_trial.py --help` 查看所需的备份、ELF、打包清单及目标文件参数。生成的 Tcl 数据与实机使用的输入一致。已验证的 SWD 连接配置在 `tools/fr8029d_openocd.cfg`，擦写逻辑在 `tools/flash_trial.tcl`。用 `tclsh tools/test_flash_trial.tcl` 验证地址限制、回滚的扇区顺序及诊断字段检查。
 
+安装前，脚本先查询 CPU 的运行状态，再将其暂停。若只读检查发现 CPU 正在处理异常或系统看门狗已启用，脚本会让原本运行的 CPU 从暂停处继续，并报告拒绝安装的原因。原本已暂停、初始状态未知、读取 CPU 状态失败或已向外设或 SRAM 发出写入时，预检失败会保留暂停状态。恢复操作遇到预检失败也会保持暂停。这些分支已用离线模型验证。
+
+离线测试还覆盖了恢复中断后的重试。恢复操作先与同一测试包的原厂和探针扇区逐字比较，跳过已经恢复的扇区。若一个扇区已擦空，或其前部是完整的原厂页、后部全为擦除值，脚本可以从头重写该扇区。恢复应用时，启动头须完整匹配原厂或探针版本。恢复启动头时，应用须完整匹配原厂版本。若调试连接中断时 Flash 已解除保护，恢复操作也接受空闲状态 `SR1=0`、`SR2=2`。扇区及 OTA 校验通过后，即使原厂数据已完整，也会恢复写保护并读回确认，再执行复位。遇到无法匹配的页内容、OTA 元数据变化或其他保护状态，预检会停止。真实断电可能留下不完整的擦除或页写入，此类状态的恢复未经过实机验证。
+
 实机写入和逐扇区读回后，先用系统复位确认 Rust 探针运行，再清除 SRAM 标记。用户给开发板断电再上电后，通过 SWD 读到新的 `FR29`、版本 `1`、结果码 `1` 及 `VTOR=0x10002000`。随后回填原厂扇区并启动原厂应用。复位后写保护读回为 `SR1=0x7c` 和 `SR2=0x02`。最后以 1 MHz SWD 读回整片 1 MiB Flash，与原厂备份逐字节一致。实机记录位于本地 `target/flash-trial/cold-power-on.log`、`restore.log`、`stock-protection.log` 和 `restore-verification.json`。
 
 QSPI 配置寄存器 bit 31 是实时 idle 标志，XIP 取指期间可为 0。诊断验证会单独忽略这一位，并检查其余 QSPI 配置、容量配置和重映射值。
