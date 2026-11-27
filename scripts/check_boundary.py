@@ -39,6 +39,8 @@ ROOT_FILES = {
     "CONTRIBUTING.md", "LICENSE", "NOTICE", "NOTICE.md",
     ".github/workflows/check.yml",
     "docs/progress.md", "docs/verification.md",
+    "docs/architecture/hardware-support.md",
+    "devices/chips/freqchip/README.md", "devices/boards/fr8029d-evb/README.md",
     "docs/plans/2026-11-02-foundation-extraction.md", "specs/foundation-extraction.md",
     "docs/plans/2026-11-02-publication.md",
     "specs/color-types.md", "docs/plans/2026-11-02-color-types.md", "docs/color-types.md",

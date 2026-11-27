@@ -2,6 +2,8 @@
 
 这个工程用 Cortex-M33 裸机 Rust 探针验证 Boot ROM 到应用入口的交接，读取启动寄存器，并把结果放在应用 SRAM。`probe` feature 启用基础探针的固件入口。默认构建只包含可在主机测试的寄存器字段解析和 Packet RAM 地址检查。厂商 SDK、ROM 反汇编和原厂镜像只用于取证。
 
+硬件文档按范围查阅：[多厂商适配架构](../../../docs/architecture/hardware-support.md)、[富芮坤型号能力表](../../chips/freqchip/README.md)、[FR8029D 板载功能与实测状态](../../boards/fr8029d-evb/README.md)。
+
 ## 构建与检查
 
 在本目录运行。
