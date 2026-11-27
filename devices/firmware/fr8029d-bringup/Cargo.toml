@@ -8,6 +8,7 @@ publish = false
 [workspace]
 
 [dependencies]
+fr8029d-chip = { path = "../../chips/freqchip/fr802x/fr8029d" }
 sha2 = { version = "=0.10.9", optional = true, default-features = false }
 moteframe-storage = { path = "../../../crates/moteframe-storage", optional = true, features = ["config-store"] }
 heapless = { version = "=0.9.3", default-features = false, optional = true }
@@ -17,6 +18,9 @@ critical-section = { version = "=1.2.0", default-features = false, features = ["
 embassy-sync = { version = "=0.8.0", default-features = false, optional = true }
 embassy-time-driver = { version = "=0.2.2", default-features = false, features = ["tick-hz-1_000_000"], optional = true }
 moteframe-ble = { path = "../../../crates/moteframe-ble", version = "=0.2.0", default-features = false, optional = true }
+
+[target.'cfg(target_arch = "arm")'.dependencies]
+fr8029d-evb = { path = "../../boards/fr8029d-evb", optional = true }
 
 [build-dependencies]
 sha2 = { version = "=0.10.9", optional = true, default-features = false }
@@ -28,23 +32,23 @@ embassy-time = { version = "=0.5.1", default-features = false, features = ["std"
 [features]
 ota-v1 = ["dep:sha2"]
 ble-gatt-ota = ["ota-v1", "qspi-config", "ble-gatt-xip-compact", "ble-gatt-event-driven"]
-qspi-config = ["dep:moteframe-storage"]
+qspi-config = ["dep:moteframe-storage", "fr8029d-chip/qspi"]
 probe = []
 ram-probe = ["probe"]
-ble-adv-probe = []
+ble-adv-probe = ["fr8029d-chip/radio"]
 ble-adv-cold = ["ble-adv-probe"]
-ble-adv-cold-xip = ["ble-adv-cold"]
+ble-adv-cold-xip = ["ble-adv-cold", "fr8029d-chip/radio-xip"]
 ble-connect-probe = ["ble-adv-cold"]
 ble-gatt-probe = ["dep:heapless", "dep:ble-controller", "dep:ble-host-trouble", "dep:embassy-sync", "dep:moteframe-ble"]
 ble-gatt-board = ["ble-connect-probe", "ble-gatt-probe", "dep:critical-section", "dep:embassy-time-driver"]
 ble-gatt-mac-probe = ["ble-gatt-probe"]
-ble-gatt-xip = ["ble-gatt-board", "ble-adv-cold-xip"]
+ble-gatt-xip = ["ble-gatt-board", "ble-adv-cold-xip", "fr8029d-chip/qspi"]
 ble-gatt-xip-compact = ["ble-gatt-xip"]
 ble-gatt-1m-only = ["ble-gatt-board"]
 ble-gatt-dle = ["ble-gatt-probe", "ble-controller/data-length", "ble-host-trouble/extended-mtu"]
 ble-gatt-freertos = ["ble-gatt-board"]
 ble-gatt-event-driven = ["ble-gatt-probe", "ble-controller/external-wake"]
-mic1-acquisition = ["ble-gatt-event-driven", "dep:critical-section"]
+mic1-acquisition = ["ble-gatt-event-driven", "dep:critical-section", "dep:fr8029d-evb"]
 mic1-config-layout-v1 = ["mic1-acquisition", "ble-gatt-xip-compact", "qspi-config"]
 
 [[bin]]

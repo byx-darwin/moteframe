@@ -1,0 +1,12 @@
+[package]
+name = "fr8029d-evb"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+fr8029d-chip = { path = "../../chips/freqchip/fr802x/fr8029d" }
+
+[lints]
+workspace = true

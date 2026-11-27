@@ -2,6 +2,8 @@
 #[path = "../src/mic_session.rs"]
 mod mic_session;
 
+const MIC1: () = ();
+
 mod mic1 {
     use std::{cell::Cell, cell::RefCell, collections::VecDeque};
 
@@ -19,21 +21,21 @@ mod mic1 {
         FULL.set(true);
     }
 
-    pub fn init() -> bool {
+    pub unsafe fn init((): ()) -> bool {
         assert!(!RUNNING.replace(true));
         true
     }
 
-    pub fn poll_sample() -> Option<u16> {
+    pub unsafe fn poll_sample() -> Option<u16> {
         assert!(RUNNING.get());
         FIFO.with_borrow_mut(VecDeque::pop_front)
     }
 
-    pub fn take_overflow() -> bool {
+    pub unsafe fn take_overflow() -> bool {
         FULL.replace(false)
     }
 
-    pub fn stop() {
+    pub unsafe fn stop() {
         assert!(RUNNING.replace(false));
     }
 

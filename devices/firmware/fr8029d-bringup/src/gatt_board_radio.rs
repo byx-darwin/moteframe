@@ -7,16 +7,17 @@ use super::{
         CONNECTED_RX_ERRORS, CONNECTION_CONTROL, EVENT_COMPLETION_TIMEOUT, LINK_ID, TX_DONE,
         prepare_link, read_end, submit, submit_link, wait_connection_event,
     },
-    diagnostic, increment, write_record, write8,
+    diagnostic, increment,
+    radio_hardware::{
+        configure_baseband, initialize, packet_halfword as halfword, set_packet_byte as write8,
+        set_packet_halfword as set_halfword, set_phy,
+    },
+    write_record,
 };
-#[cfg(test)]
-use super::{test_halfword as halfword, test_set_halfword as set_halfword};
 use ble_controller::{
     Advertisement, ConnectionParameters, FrameKind, LinkBackend, LinkEvent, LinkFrame, OwnedQueue,
     Peer, TxAdmission,
 };
-#[cfg(not(test))]
-use core::ptr::{read_volatile, write_volatile};
 use core::sync::atomic::{Ordering, fence};
 use fr8029d_bringup::{
     advertising::{
@@ -1150,7 +1151,7 @@ impl Radio {
         increment(RADIO_TIMEOUTS);
         // A timed-out slot may still own exchange RAM. Reset the scheduler
         // before discarding its descriptors and building another event.
-        super::cold_radio::configure_baseband()?;
+        configure_baseband()?;
         let now = clock().ok_or(3_u32)?;
         super::gatt_board_time::rebase_clock(now);
         self.pending = None;
@@ -1167,11 +1168,7 @@ impl Radio {
                 {
                     link.tx_two_m = rates & 3 != 0;
                 }
-                // Preserve the controller-owned fields above the RX and TX rate pairs.
-                set_halfword(
-                    CONTROL + 6,
-                    (halfword(CONTROL + 6) & !15) | u16::from(rates),
-                );
+                set_phy(CONNECTION_CONTROL, rates);
                 self.events
                     .push(BoardEvent::PhyUpdated(1 + (rates & 3), 1 + (rates >> 2)))
                     .map_err(|_| 22_u32)?;
@@ -1363,7 +1360,7 @@ impl LinkBackend for Radio {
     fn reset(&mut self) -> Result<(), u32> {
         self.stop()?;
         if !self.initialized {
-            super::cold_radio::init()?;
+            initialize()?;
             self.initialized = true;
         }
         Ok(())
@@ -1543,17 +1540,4 @@ fn echo_fragment(remaining: &mut u8, kind: FrameKind, payload: &[u8]) -> bool {
         _ => return false,
     }
     *remaining == 0
-}
-
-#[cfg(not(test))]
-fn halfword(address: usize) -> u16 {
-    // SAFETY: This module reads only fixed, aligned control and TX descriptor fields.
-    unsafe { read_volatile(address as *const u16) }
-}
-
-#[cfg(not(test))]
-fn set_halfword(address: usize, value: u16) {
-    // SAFETY: These are aligned fields in the installed control/descriptor
-    // records, written between completed events while the scheduler is idle.
-    unsafe { write_volatile(address as *mut u16, value) };
 }

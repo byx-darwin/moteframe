@@ -1,7 +1,15 @@
 //! MIC1 acquisition state used by the single foreground BLE runner.
-use crate::{mic_config, mic1};
+#[cfg(test)]
+use crate::MIC1;
+use crate::mic_config;
+#[cfg(test)]
+use crate::mic1;
 use core::cell::RefCell;
 use critical_section::Mutex;
+#[cfg(not(test))]
+use fr8029d_evb::MIC1;
+#[cfg(not(test))]
+use fr8029d_evb::saradc as mic1;
 
 const CAPACITY: usize = 32;
 struct Capture {
@@ -62,12 +70,14 @@ pub(crate) fn poll() {
     }
     let divisor = mic_config::value();
     for _ in 0..64 {
-        let Some(value) = mic1::poll_sample() else {
+        // SAFETY: The single foreground owns the ADC for this capture.
+        let Some(value) = (unsafe { mic1::poll_sample() }) else {
             break;
         };
         state(|s| s.push(value, divisor));
     }
-    if mic1::take_overflow() {
+    // SAFETY: Access the same ADC session polled above.
+    if unsafe { mic1::take_overflow() } {
         state(|s| s.full_polls = s.full_polls.saturating_add(1));
     }
 }
@@ -83,7 +93,8 @@ pub(crate) fn on_disconnect() {
 
 fn stop() {
     if state(|s| core::mem::take(&mut s.running)) {
-        mic1::stop();
+        // SAFETY: The foreground that started the ADC is releasing it.
+        unsafe { mic1::stop() };
     }
 }
 
@@ -98,7 +109,8 @@ pub(crate) fn request(frame: &[u8], out: &mut [u8; 20]) -> bool {
     match op {
         1 => {
             if poll_interval_us().is_none() {
-                let ready = mic1::init();
+                // SAFETY: This is the sole ADC owner and the board supplies MIC1 wiring.
+                let ready = unsafe { mic1::init(MIC1) };
                 state(|s| {
                     *s = Capture::new();
                     s.running = ready;
@@ -147,4 +159,70 @@ pub(crate) fn request(frame: &[u8], out: &mut [u8; 20]) -> bool {
         }
     });
     true
+}
+
+/// The firmware's sole foreground capture and configuration session.
+#[cfg(not(test))]
+#[derive(Debug)]
+pub struct MicSession {
+    _foreground_only: core::marker::PhantomData<*mut ()>,
+}
+
+#[cfg(not(test))]
+impl MicSession {
+    /// Selects MIC1 for the foreground GATT runner.
+    ///
+    /// # Safety
+    ///
+    /// Use only on the FR8029D EVB with a 24 MHz crystal. The caller must
+    /// run a single session in the foreground with exclusive SARADC access.
+    ///
+    /// With `mic1-config-layout-v1`, dedicate both layout-v1 configuration
+    /// sectors to this session across firmware and update tools. Invoke
+    /// restore before advertising and save after physical disconnect with
+    /// sampling stopped. Reserve QSPI0, the NOR and the cache for those
+    /// operations, excluding other writers, DMA and debugger accesses.
+    /// Reset must copy the SRAM command routine. The fault handler and
+    /// non-maskable exception paths must be safe during XIP unavailability.
+    #[must_use]
+    pub const unsafe fn new() -> Self {
+        Self {
+            _foreground_only: core::marker::PhantomData,
+        }
+    }
+}
+
+#[cfg(not(test))]
+impl crate::gatt_runner::GattApplication for MicSession {
+    type Response = [u8; 20];
+
+    fn on_boot(&self) {
+        on_boot();
+    }
+
+    fn poll(&self) {
+        poll();
+    }
+
+    fn on_disconnect(&self) {
+        on_disconnect();
+    }
+
+    fn response<'a>(&self, value: &'a [u8], scratch: &'a mut [u8; 20]) -> &'a [u8] {
+        if request(value, scratch) {
+            scratch
+        } else {
+            value
+        }
+    }
+}
+
+/// Caps a board sleep so a running capture is serviced between BLE events.
+#[cfg(not(test))]
+#[must_use]
+pub fn acquisition_wake_delay(ble_delay_us: Option<u32>) -> Option<u32> {
+    match (ble_delay_us, poll_interval_us()) {
+        (Some(ble), Some(mic)) => Some(ble.min(mic)),
+        (ble, mic) => ble.or(mic),
+    }
 }

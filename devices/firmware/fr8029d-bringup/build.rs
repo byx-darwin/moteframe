@@ -1,4 +1,7 @@
 //! Select the FR8029D memory layout and build the opt-in `FreeRTOS` kernel.
+#[cfg(all(feature = "mic1-acquisition", feature = "ble-gatt-ota"))]
+compile_error!("Select either mic1-acquisition or ble-gatt-ota");
+
 use std::{
     env,
     error::Error,
@@ -72,30 +75,12 @@ fn build_freertos(manifest_dir: &Path) -> Result<(), Box<dyn Error>> {
     println!("cargo:rerun-if-env-changed=FREERTOS_CLANG");
 
     let config = manifest_dir.join("freertos");
-    let kernel = env::var_os("FREERTOS_KERNEL_DIR").map_or_else(
-        || manifest_dir.join("../../target/fr8029d-freertos/kernel"),
-        PathBuf::from,
+    let runtime = manifest_dir.join("../../runtimes/freertos");
+    println!(
+        "cargo:rerun-if-changed={}",
+        runtime.join("moteframe_freertos.h").display()
     );
-    let revision = Command::new("git")
-        .arg("-C")
-        .arg(&kernel)
-        .args(["rev-parse", "HEAD"])
-        .output()?;
-    if !revision.status.success()
-        || String::from_utf8_lossy(&revision.stdout).trim() != FREERTOS_REVISION
-    {
-        return Err(format!(
-            concat!(
-                "FreeRTOS-Kernel V11.2.0 ({}) is required at {}. ",
-                "Clone https://github.com/FreeRTOS/FreeRTOS-Kernel.git with ",
-                "--depth 1 --branch V11.2.0 or set FREERTOS_KERNEL_DIR to the pinned checkout."
-            ),
-            FREERTOS_REVISION,
-            kernel.display(),
-        )
-        .into());
-    }
-    let kernel = kernel.canonicalize()?;
+    let kernel = freertos_kernel(manifest_dir)?;
     let include = kernel.join("include");
     let port = kernel.join("portable/GCC/ARM_CM33_NTZ/non_secure");
     let out_dir = PathBuf::from(env::var_os("OUT_DIR").ok_or("OUT_DIR is missing")?);
@@ -151,6 +136,8 @@ fn build_freertos(manifest_dir: &Path) -> Result<(), Box<dyn Error>> {
             .arg("-I")
             .arg(&config)
             .arg("-I")
+            .arg(&runtime)
+            .arg("-I")
             .arg(&include)
             .arg("-I")
             .arg(&port)
@@ -170,6 +157,33 @@ fn build_freertos(manifest_dir: &Path) -> Result<(), Box<dyn Error>> {
         );
     }
     Ok(())
+}
+
+fn freertos_kernel(manifest_dir: &Path) -> Result<PathBuf, Box<dyn Error>> {
+    let kernel = env::var_os("FREERTOS_KERNEL_DIR").map_or_else(
+        || manifest_dir.join("../../target/fr8029d-freertos/kernel"),
+        PathBuf::from,
+    );
+    let revision = Command::new("git")
+        .arg("-C")
+        .arg(&kernel)
+        .args(["rev-parse", "HEAD"])
+        .output()?;
+    if !revision.status.success()
+        || String::from_utf8_lossy(&revision.stdout).trim() != FREERTOS_REVISION
+    {
+        return Err(format!(
+            concat!(
+                "FreeRTOS-Kernel V11.2.0 ({}) is required at {}. ",
+                "Clone https://github.com/FreeRTOS/FreeRTOS-Kernel.git with ",
+                "--depth 1 --branch V11.2.0 or set FREERTOS_KERNEL_DIR to the pinned checkout."
+            ),
+            FREERTOS_REVISION,
+            kernel.display(),
+        )
+        .into());
+    }
+    Ok(kernel.canonicalize()?)
 }
 
 #[cfg(feature = "ble-gatt-ota")]

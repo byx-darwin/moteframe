@@ -1,5 +1,10 @@
 [workspace]
-members = ["crates/ble-controller", "crates/ble-host-trouble"]
+members = [
+    "boards/fr8029d-evb",
+    "chips/freqchip/fr802x/fr8029d",
+    "crates/ble-controller",
+    "crates/ble-host-trouble",
+]
 resolver = "3"
 
 [workspace.package]

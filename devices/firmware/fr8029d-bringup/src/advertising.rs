@@ -39,10 +39,7 @@ const _: () = {
 pub const CONNECTABLE_ADDRESS: [u8; 6] = [0x9e, 0x80, 0x29, 0x01, 0x25, 0xc3];
 /// Advertising flags and name for the connectable receive probe.
 pub const CONNECTABLE_DATA: &[u8; 14] = b"\x02\x01\x06\x0a\x09FR29-CONN";
-/// Scheduler entry stride in bytes.
-pub const SLOT_STRIDE: usize = 16;
-/// Maximum value of the scheduler's coarse clock.
-pub const CLOCK_MASK: u32 = 0x0fff_ffff;
+pub use fr8029d_chip::radio::{CLOCK_MASK, SLOT_STRIDE};
 
 /// Builds the control record for the one legacy advertising event.
 #[must_use]

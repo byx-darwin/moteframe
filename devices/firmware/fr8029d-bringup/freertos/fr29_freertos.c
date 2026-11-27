@@ -1,5 +1,4 @@
-#include "FreeRTOS.h"
-#include "task.h"
+#include "moteframe_freertos.h"
 
 #if defined(FR29_OTA_XIP)
 #define FR29_BLE_STACK_BYTES 19456U
@@ -28,14 +27,12 @@ static TaskHandle_t fr29_ble_handle;
 
 void fr29_notify_from_isr(void)
 {
-    BaseType_t woken = pdFALSE;
-    vTaskNotifyGiveFromISR(fr29_ble_handle, &woken);
-    portYIELD_FROM_ISR(woken);
+    moteframe_freertos_notify_from_isr(fr29_ble_handle);
 }
 
 void fr29_wait_notification(void)
 {
-    (void)ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+    moteframe_freertos_wait_notification();
 }
 #endif
 
@@ -74,9 +71,14 @@ void vApplicationGetIdleTaskMemory(StaticTask_t **task, StackType_t **stack,
 
 void fr29_freertos_start(void (*entry)(void *))
 {
-    TaskHandle_t task = xTaskCreateStatic(entry, "BLE", FR29_BLE_STACK_WORDS, NULL,
-                                         tskIDLE_PRIORITY + 1U, fr29_ble_task_stack,
-                                         &fr29_ble_task);
+    const MoteframeFreeRtosTask config = {
+        .name = "BLE",
+        .priority = tskIDLE_PRIORITY + 1U,
+        .stack = fr29_ble_task_stack,
+        .stack_words = FR29_BLE_STACK_WORDS,
+        .storage = &fr29_ble_task,
+    };
+    TaskHandle_t task = moteframe_freertos_create_task(&config, entry, NULL);
     if (task == NULL) {
         fr29_freertos_status = FR29_FREERTOS_TASK_CREATE_FAILED;
         return;

@@ -585,6 +585,95 @@ fn exercise_runner(event_driven: bool) {
     }
 }
 
+#[cfg(feature = "ble-gatt-event-driven")]
+#[test]
+fn event_driven_runner_drops_invalid_responses_and_reconnects() {
+    use fr8029d_bringup::{
+        gatt::VALUE_LEN,
+        gatt_runner::{GattApplication, run_event_driven_with_application},
+    };
+
+    thread_local! {
+        static BOOTED: Cell<bool> = const { Cell::new(false) };
+        static POLLED: Cell<bool> = const { Cell::new(false) };
+        static DISCONNECTED: Cell<bool> = const { Cell::new(false) };
+    }
+    struct TestApplication;
+    impl GattApplication for TestApplication {
+        type Response = [u8; VALUE_LEN + 1];
+
+        fn on_boot(&self) {
+            BOOTED.set(true);
+        }
+
+        fn poll(&self) {
+            POLLED.set(true);
+        }
+
+        fn on_disconnect(&self) {
+            DISCONNECTED.set(true);
+        }
+
+        fn response<'a>(&self, value: &'a [u8], response: &'a mut Self::Response) -> &'a [u8] {
+            assert!(BOOTED.get() && POLLED.get());
+            response.fill(0x5a);
+            match value {
+                [0xad, 1, 0, 0] => &response[..VALUE_LEN],
+                [0xad, 2, 0, 0] => response,
+                [0xad, 3, 0, 0] => &[],
+                _ => panic!("unexpected application write"),
+            }
+        }
+    }
+
+    let _fixture = HOST_FIXTURE.lock().unwrap();
+    let radio = ScriptedRadio::default();
+    let mut resources = Resources::new();
+    let identity = GattIdentity {
+        address: RandomAddress::new([1, 2, 3, 4, 5, 0xc0]).unwrap(),
+        version: Version::new(8, 0xffff, 1),
+        name: "FR29-GATT",
+        advertising_data: b"\x02\x01\x06\x0a\x09FR29-GATT",
+    };
+    let mut app = pin!(run_event_driven_with_application(
+        radio.clone(),
+        &mut resources,
+        identity,
+        |_| {},
+        None,
+        TestApplication,
+    ));
+    let mut pump = fixture_pump(app.as_mut(), &radio, true);
+    pump_until(&mut pump, || radio.0.borrow().advertising);
+    assert!(BOOTED.get());
+    for _ in 0..2 {
+        DISCONNECTED.set(false);
+        radio.event(LinkEvent::Connected(
+            Peer::new([7; 6], true),
+            ConnectionParameters::new(24, 0, 72).unwrap(),
+        ));
+        radio.exchange(&mut pump, &[0x12, 10, 0, 1, 0], &[0x13]);
+        for op in [2, 3] {
+            radio.exchange(&mut pump, &[0x12, 9, 0, 0xad, op, 0, 0], &[0x13]);
+            // The accepted write remains readable and there is no invalid notification.
+            radio.exchange(&mut pump, &[0x0a, 9, 0], &[0x0b, 0xad, op, 0, 0]);
+        }
+        radio.exchange(&mut pump, &[0x12, 9, 0, 0xad, 1, 0, 0], &[0x13]);
+        pump_until(&mut pump, || !radio.0.borrow().replies.is_empty());
+        let mut notification = vec![0x1b, 9, 0];
+        notification.extend([0x5a; VALUE_LEN]);
+        assert_eq!(
+            radio.0.borrow_mut().replies.pop_front().unwrap(),
+            notification
+        );
+        assert!(!DISCONNECTED.get());
+        radio.event(LinkEvent::Disconnected(0x13));
+        pump_until(&mut pump, || {
+            DISCONNECTED.get() && radio.0.borrow().advertising
+        });
+    }
+}
+
 #[test]
 fn test_should_reject_an_oversized_advertisement_without_starting_radio() {
     let radio = ScriptedRadio::default();

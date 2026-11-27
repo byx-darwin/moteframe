@@ -2,23 +2,7 @@
 use core::ops::Range;
 use moteframe_storage::write::Slot;
 
-/// Physical size of the validated P25Q80 chip.
-pub const CAPACITY: u32 = 1 << 20;
-/// Independent erase sector size.
-pub const SECTOR: usize = 4096;
-/// Direct access program granularity used by the snapshot format.
-pub const PAGE: usize = 256;
-
-/// Configuration or controller precondition failed.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Error {
-    /// Geometry, alignment, offset or a protected range conflicts.
-    Bounds,
-    /// Chip ID or controller profile differs from the supported board.
-    Profile,
-    /// Unexpected protection or write-enable status.
-    Protection,
-}
+pub use fr8029d_chip::qspi::{CAPACITY, Error, PAGE, SECTOR};
 
 /// Two consecutive erase sectors in a caller-owned layout.
 #[derive(Clone, Copy, Debug)]

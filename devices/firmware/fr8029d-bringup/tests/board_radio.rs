@@ -99,15 +99,69 @@ fn exchange_slot(slot: u32) -> usize {
     PACKET_RAM + slot as usize * 16
 }
 
-#[allow(
-    clippy::unnecessary_wraps,
-    reason = "Mocks the fallible board radio interface"
-)]
-mod cold_radio {
-    pub(super) fn init() -> Result<(), u32> {
+mod radio_hardware {
+    use super::{
+        EVENT_STATUS, IRQ_ACK, IRQ_EVENT_END, IRQ_STATUS, PACKET_RAM, SUBMIT, exchange_slot, read8,
+        read32, test_halfword, test_set_halfword, write_record, write8, write32,
+    };
+
+    pub(super) fn packet_byte(address: usize) -> u8 {
+        read8(address)
+    }
+
+    pub(super) fn packet_word(address: usize) -> u32 {
+        read32(address)
+    }
+
+    pub(super) fn packet_halfword(address: usize) -> u16 {
+        test_halfword(address)
+    }
+
+    pub(super) fn set_packet_byte(address: usize, value: u8) {
+        write8(address, value);
+    }
+
+    pub(super) fn set_packet_halfword(address: usize, value: u16) {
+        test_set_halfword(address, value);
+    }
+
+    pub(super) fn set_phy(control: u16, rates: u8) {
+        let address = PACKET_RAM + usize::from(control) + 6;
+        test_set_halfword(
+            address,
+            fr8029d_chip::radio::phy_control_word(test_halfword(address), rates),
+        );
+    }
+
+    pub(super) fn scheduler_fault() -> Option<u32> {
+        (read32(0x4000_0010) & (1 << 16) != 0).then(|| read32(0x4000_0060))
+    }
+
+    pub(super) fn take_event_end() -> Option<u32> {
+        if read32(IRQ_STATUS) & IRQ_EVENT_END == 0 {
+            return None;
+        }
+        let status = read32(EVENT_STATUS);
+        write32(IRQ_ACK, IRQ_EVENT_END);
+        Some(status)
+    }
+
+    pub(super) fn submit_slot(slot: u32, words: &[u16; 8]) {
+        write_record(exchange_slot(slot), words);
+        write32(SUBMIT, 0x8000_0000 | slot);
+    }
+
+    pub(super) fn set_rx_queue(_: u16) {}
+
+    #[allow(clippy::unnecessary_wraps, reason = "Mocks the fallible radio startup")]
+    pub(super) fn initialize() -> Result<(), u32> {
         Ok(())
     }
 
+    #[allow(
+        clippy::unnecessary_wraps,
+        reason = "Mocks the fallible baseband reset"
+    )]
     pub(super) fn configure_baseband() -> Result<(), u32> {
         super::SUBMITTED_SLOTS.set(0);
         Ok(())

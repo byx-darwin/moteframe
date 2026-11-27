@@ -2,7 +2,7 @@
 
 本目录包含 FR8029D 的 Rust 源码、板级适配和测试。固件直接引用仓库根目录的 MoteFrame crates，并使用独立的 Cargo 入口，目标为 Cortex-M33（`thumbv8m.main-none-eabi`）。[FR8029D 板级说明](firmware/fr8029d-bringup/README.md)
 
-设备工作区包含可复用的 BLE 控制器接口 `ble-controller` 和 Host 适配 `ble-host-trouble`。[设备 crates](crates/)
+设备工作区包含可复用的 BLE 控制器接口 `ble-controller`、Host 适配 `ble-host-trouble`，以及 FR8029D 的芯片驱动和 EVB 板级配置。FreeRTOS 的静态任务和通知桥接由各固件通过 C 头文件接入。[多厂商硬件适配架构](../docs/architecture/hardware-support.md)
 
 从仓库根目录运行主机测试。
 

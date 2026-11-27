@@ -105,6 +105,33 @@ pub enum GattRunError<E> {
     HostStopped,
 }
 
+/// Foreground application hooks used by the event-driven GATT runner.
+pub trait GattApplication {
+    /// Scratch storage for the application response.
+    type Response: Default;
+
+    /// Restore application state before advertising starts.
+    fn on_boot(&self) {}
+
+    /// Service application work after the radio has advanced.
+    fn poll(&self) {}
+
+    /// Release connection resources after the link has disconnected.
+    fn on_disconnect(&self) {}
+
+    /// Select the Notify payload for a completed write.
+    ///
+    /// The runner sends responses of 1 to [`VALUE_LEN`] bytes. Other lengths
+    /// skip notification and leave the committed write and connection intact.
+    fn response<'a>(&self, value: &'a [u8], _scratch: &'a mut Self::Response) -> &'a [u8] {
+        value
+    }
+}
+
+impl GattApplication for () {
+    type Response = ();
+}
+
 /// Polls upstream Host tasks and runs the lab peripheral until the first fault.
 ///
 /// Pin and poll on a single foreground executor with a board-provided critical
@@ -124,27 +151,29 @@ pub fn run<B: LinkBackend, F: FnMut(GattReport)>(
         // into another future on the BLE task stack.
         async move {
             let hci = HciController::new(Controller::new(backend, identity.version));
-            run_hci::<false, _, _, _>(hci.borrowed(), resources, identity, report, None, || Ok(()))
-                .await
+            run_hci::<false, _, _, _>(
+                hci.borrowed(),
+                resources,
+                identity,
+                report,
+                None,
+                &(),
+                || Ok(()),
+            )
+            .await
         }
     }
     #[cfg(not(feature = "ble-gatt-dle"))]
     {
         let hci = HciController::new(Controller::new(backend, identity.version));
-        run_hci::<false, _, _, _>(hci, resources, identity, report, None, || Ok(()))
+        run_hci::<false, _, _, _>(hci, resources, identity, report, None, &(), || Ok(()))
     }
 }
 
 /// Runs the same GATT application with owner-driven radio service.
 /// The board advances the radio on IRQ, timer and software wakes, including
 /// while the Host receive lane is blocked.
-#[cfg(all(
-    feature = "ble-gatt-event-driven",
-    not(any(
-        feature = "ble-gatt-dle",
-        all(feature = "mic1-acquisition", target_arch = "arm")
-    ))
-))]
+#[cfg(all(feature = "ble-gatt-event-driven", not(feature = "ble-gatt-dle")))]
 pub async fn run_event_driven<B: LinkBackend, F: FnMut(GattReport)>(
     backend: B,
     resources: &mut Resources,
@@ -155,26 +184,44 @@ pub async fn run_event_driven<B: LinkBackend, F: FnMut(GattReport)>(
 }
 
 /// Runs the event-driven Host with its controller queues borrowed in place.
-#[cfg(all(
-    feature = "ble-gatt-event-driven",
-    any(
-        feature = "ble-gatt-dle",
-        all(feature = "mic1-acquisition", target_arch = "arm")
-    )
-))]
+#[cfg(all(feature = "ble-gatt-event-driven", feature = "ble-gatt-dle"))]
 pub fn run_event_driven<B: LinkBackend, F: FnMut(GattReport)>(
     backend: B,
     resources: &mut Resources,
     identity: GattIdentity,
     report: F,
 ) -> impl Future<Output = GattRunError<B::Error>> {
+    run_event_driven_with_application(backend, resources, identity, report, None, ())
+}
+
+/// Runs the event-driven GATT profile with the supplied foreground application.
+/// An optional OTA receiver is used when the OTA service is enabled.
+#[cfg(feature = "ble-gatt-event-driven")]
+pub fn run_event_driven_with_application<
+    B: LinkBackend,
+    F: FnMut(GattReport),
+    A: GattApplication,
+>(
+    backend: B,
+    resources: &mut Resources,
+    identity: GattIdentity,
+    report: F,
+    ota: OtaCallback<'_>,
+    application: A,
+) -> impl Future<Output = GattRunError<B::Error>> {
     // Construct the controller before pinning the Host future. Initializing its
     // long-packet queues inside the nested poll frame exceeds the SRAM task stack.
     let hci = HciController::new_with_external_wake(Controller::new(backend, identity.version));
     async move {
-        run_hci::<true, _, _, _>(hci.borrowed(), resources, identity, report, None, || {
-            hci.service()
-        })
+        run_hci::<true, _, _, _>(
+            hci.borrowed(),
+            resources,
+            identity,
+            report,
+            ota,
+            &application,
+            || hci.service(),
+        )
         .await
     }
 }
@@ -196,13 +243,7 @@ type OtaCallback<'a> = Option<&'a mut dyn FnMut(Option<&[u8]>) -> bool>;
 
 #[cfg(all(
     feature = "ble-gatt-event-driven",
-    any(
-        not(any(
-            feature = "ble-gatt-dle",
-            all(feature = "mic1-acquisition", target_arch = "arm")
-        )),
-        feature = "ota-v1"
-    )
+    any(not(feature = "ble-gatt-dle"), feature = "ota-v1")
 ))]
 async fn run_events<B: LinkBackend, F: FnMut(GattReport)>(
     backend: B,
@@ -212,9 +253,15 @@ async fn run_events<B: LinkBackend, F: FnMut(GattReport)>(
     ota: OtaCallback<'_>,
 ) -> GattRunError<B::Error> {
     let hci = HciController::new_with_external_wake(Controller::new(backend, identity.version));
-    run_hci::<true, _, _, _>(hci.borrowed(), resources, identity, report, ota, || {
-        hci.service()
-    })
+    run_hci::<true, _, _, _>(
+        hci.borrowed(),
+        resources,
+        identity,
+        report,
+        ota,
+        &(),
+        || hci.service(),
+    )
     .await
 }
 
@@ -224,6 +271,7 @@ async fn run_hci<const EXTERNAL: bool, C, E, F>(
     identity: GattIdentity,
     report: F,
     ota: OtaCallback<'_>,
+    application: &impl GattApplication,
     mut service: impl FnMut() -> Result<(), HciError<E>>,
 ) -> GattRunError<E>
 where
@@ -255,13 +303,12 @@ where
         }
     });
     let mut control = pin!(control.run());
-    let mut app = pin!(serve(&stack, identity, report, ota));
+    let mut app = pin!(serve(&stack, identity, report, ota, application));
     poll_fn(|cx| {
         if let Err(error) = service() {
             return Poll::Ready(GattRunError::Host(BleHostError::Controller(error)));
         }
-        #[cfg(all(feature = "mic1-acquisition", target_arch = "arm"))]
-        crate::mic_session::poll();
+        application.poll();
         let result = if EXTERNAL {
             // The Controller has already advanced. Deliver its observations
             // before the Host resumes any outgoing data.
@@ -313,11 +360,12 @@ fn add_ota_service(table: &mut AttributeTable<'_, NoopRawMutex, ATTRIBUTES>) -> 
     handle
 }
 
-async fn serve<C, E, F>(
+async fn serve<C, E, F, A: GattApplication>(
     stack: &Stack<'_, C, DefaultPacketPool>,
     identity: GattIdentity,
     mut report: F,
     mut ota: OtaCallback<'_>,
+    application: &A,
 ) -> Result<Infallible, GattRunError<E>>
 where
     C: ble_host_trouble::host::Controller<Error = HciError<E>>,
@@ -348,8 +396,7 @@ where
         parameters.interval_max = interval;
     }
     let mut peripheral = stack.peripheral();
-    #[cfg(all(feature = "mic1-acquisition", target_arch = "arm"))]
-    crate::mic_session::on_boot();
+    application.on_boot();
     loop {
         let acceptor = peripheral
             .advertise(
@@ -376,8 +423,7 @@ where
         let mut writes = CommittedWrites::new();
         let out_of_memory = loop {
             let mut bytes = [0; VALUE_LEN];
-            #[cfg(all(feature = "mic1-acquisition", target_arch = "arm"))]
-            let mut response = [0; VALUE_LEN];
+            let mut response = A::Response::default();
             let notification = match profile
                 .handle_with_ota(
                     connection.next().await,
@@ -401,10 +447,11 @@ where
                         length: meta.length,
                         bytes,
                     }));
-                    let value = &bytes[..meta.length];
-                    #[cfg(all(feature = "mic1-acquisition", target_arch = "arm"))]
-                    let value = echo_response(value, &mut response);
-                    Notification::Echo(value)
+                    let reply = application.response(&bytes[..meta.length], &mut response);
+                    if reply.is_empty() || reply.len() > VALUE_LEN {
+                        continue;
+                    }
+                    Notification::Echo(reply)
                 }
                 Ok(GattProgress::Disconnected) => break false,
             };
@@ -421,26 +468,6 @@ where
             while !matches!(link.next().await, ConnectionEvent::Disconnected { .. }) {}
         }
         report(GattReport::Disconnected);
-        #[cfg(all(feature = "mic1-acquisition", target_arch = "arm"))]
-        crate::mic_session::on_disconnect();
-    }
-}
-
-#[cfg(all(feature = "mic1-acquisition", target_arch = "arm"))]
-fn echo_response<'a>(value: &'a [u8], response: &'a mut [u8; VALUE_LEN]) -> &'a [u8] {
-    if crate::mic_session::request(value, response) {
-        response
-    } else {
-        value
-    }
-}
-
-/// Caps a board sleep so a running capture gets serviced between BLE events.
-#[cfg(all(feature = "mic1-acquisition", target_arch = "arm"))]
-#[must_use]
-pub fn acquisition_wake_delay(ble_delay_us: Option<u32>) -> Option<u32> {
-    match (ble_delay_us, crate::mic_session::poll_interval_us()) {
-        (Some(ble), Some(mic)) => Some(ble.min(mic)),
-        (ble, mic) => ble.or(mic),
+        application.on_disconnect();
     }
 }

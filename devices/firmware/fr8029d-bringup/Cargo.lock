@@ -232,10 +232,26 @@ dependencies = [
  "embassy-sync",
  "embassy-time",
  "embassy-time-driver",
+ "fr8029d-chip",
+ "fr8029d-evb",
  "heapless",
  "moteframe-ble",
  "moteframe-storage",
  "sha2",
+]
+
+[[package]]
+name = "fr8029d-chip"
+version = "0.1.0"
+dependencies = [
+ "critical-section",
+]
+
+[[package]]
+name = "fr8029d-evb"
+version = "0.1.0"
+dependencies = [
+ "fr8029d-chip",
 ]
 
 [[package]]

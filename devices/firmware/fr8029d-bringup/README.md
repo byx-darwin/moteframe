@@ -219,24 +219,27 @@ flowchart TD
     M["moteframe-ble<br/>WriteSlot"]
     H["TrouBLE Host<br/>由 ble-host-trouble 接入"]
     C["ble-controller<br/>HCI 控制器与链路层逻辑"]
-    R["FR8029D 芯片后端<br/>Radio"]
+    R["固件 Radio 适配<br/>广播、连接事件与 PHY 策略"]
+    D["fr8029d-chip::radio<br/>校准、基带、交换 RAM 与时隙"]
     G -.->|暂存回显特征的完整写入| M
     G -->|GATT 属性与通知| H
     H -->|HCI 命令与 ACL 数据| C
     C -->|LinkBackend 接口| R
+    R -->|提交时隙、读写记录、确认事件| D
 ```
 
 | Crate | 职责与依赖 |
 | --- | --- |
 | [moteframe-ble](../../../crates/moteframe-ble/README.md) | 框架层的 GATT 值处理工具，提供定长写入槽，以及可接入不同后端的通知校验接口。可独立于 Host 和控制器使用。 |
 | [ble-host-trouble](../../crates/ble-host-trouble/src/lib.rs) | 将上游 `trouble-host` 接入设备工程，配置 Host 的连接资源和包池，提供收发与控制任务的轮询入口。组装 Host 时接受实现控制器接口的类型，并复用 `ble-controller` 的 `RandomAddress`。 |
-| [ble-controller](../../crates/ble-controller/src/lib.rs) | 通过 `bt-hci` 向 Host 提供控制器接口，管理广播、连接、链路控制和有界收发队列。固件中的 `Radio` 实现它定义的 `LinkBackend`，负责 FR8029D 的射频调度与收发。[芯片后端实现](src/gatt_board_radio.rs) |
+| [ble-controller](../../crates/ble-controller/src/lib.rs) | 通过 `bt-hci` 向 Host 提供控制器接口，管理广播、连接、链路控制和有界收发队列。固件中的 `Radio` 实现 `LinkBackend`，处理广播、连接事件和 PHY 切换时机。[固件适配](src/gatt_board_radio.rs) |
+| [fr8029d-chip](../../chips/freqchip/fr802x/fr8029d/src/radio.rs) | FR8029D 的射频校准与硬件接口，提供基带时钟、交换 RAM、时隙提交及事件确认。裸机和 FreeRTOS 使用同一个驱动。 |
 
 以一次 20 字节回显为例，手机写入**自定义回显特征**后，GATT 服务用 `moteframe-ble` 的 `WriteSlot<u16, 20>` 暂存特征句柄和数据。固件取出本次写入的有效字节，调用 TrouBLE 的 `notify_raw()` 向已订阅的手机发送原值。SDK 兼容服务有独立的行为，订阅 FFF3 后发送固定的五字节通知 `01 02 03 04 05`。[GATT 服务实现](src/gatt.rs)
 
 ### 可连接广播与最小 GATT
 
-`ble-connect-probe` 从 SRAM 运行独立的 1M `ADV_IND`、扫描响应、连接请求接收和数据事件探针。`ble-gatt-board` 在同一板级初始化之上实现 `ble-controller::LinkBackend`，复用现有 HCI Controller 和 TrouBLE Host。GATT 接收的完整写入经 `moteframe_ble::WriteSlot` 交给应用。依赖只在启用 GATT 特性时引入。
+`ble-connect-probe` 从 SRAM 运行独立的 1M `ADV_IND`、扫描响应、连接请求接收和数据事件探针。`ble-gatt-board` 在同一板级初始化之上实现 `ble-controller::LinkBackend`，复用现有 HCI Controller 和 TrouBLE Host。GATT 接收的完整写入经 `moteframe_ble::WriteSlot` 交给应用。Host 和控制器依赖随 GATT 特性引入。
 
 ```sh
 cargo test --offline --locked --features ble-gatt-probe
@@ -604,6 +607,8 @@ Mac 验收程序位于 [ble_mic1.swift](../../scripts/ble_mic1.swift)。用 `swi
 | SRAM 临时运行与测栈 | `ble-gatt-board,ble-gatt-mac-probe,mic1-acquisition` | `ble-gatt-freertos` |
 | 产品布局 XIP 与配置持久化 | `mic1-config-layout-v1` | `ble-gatt-freertos` |
 
+MIC1 采集和 OTA 维护使用独立镜像。`mic1-acquisition` 与 `ble-gatt-ota` 同时启用时，构建会直接报错。
+
 ### 与 M2 的资源对照
 
 下表记录首轮长测前的 XIP 应用载荷，静态 RAM 包含 data、bss 和对齐。M2 发布基线使用普通 XIP，M3 的持久化构建使用紧凑 XIP。表中另列相同紧凑设置下关闭 MIC1 的重建结果，便于区分链接配置变化与采集功能的成本。
@@ -669,3 +674,84 @@ Mac 验收工具支持 `--seconds 600`。每次连接先订阅，再在采集中
 | 10 | 54 / 54 | 57 / 57 |
 
 两版在每轮采集中写入的 6、12、8 均立即生效，停止采集、保持连接时仍为待保存。断连后复位读出 8，采样计数为零，待保存标志已清除。两次物理读回均为槽 A 第 1 代、值 8、CRC32 `0x42fff455`，槽 B 保持擦除态，槽外内容与各自安装的镜像一致。每版试验后分别恢复 SDK v0.3.6，1,048,576 B 全片与各自备份逐字节一致，SHA-256 为 `072524958e690a560a70e50ef64ac6d3992aaa8c908ff240d7042cc0d577b5ed`，写保护回读 SR1=`0x7C`、SR2=`0x02`。
+
+### M3.1 MIC1 分层和 FreeRTOS 桥接
+
+FR8029D 芯片 crate 负责 SARADC、时钟、模拟前端和 FIFO。EVB crate 提供 MIC1 输入和偏置配置。固件组装采集会话，负责采样抽取、缓存、Notify 和配置保存。GATT 运行流程通过前台应用接口调用采集会话。[芯片驱动](../../chips/freqchip/fr802x/fr8029d/src/saradc.rs) · [板级配置](../../boards/fr8029d-evb/src/lib.rs) · [采集会话](src/mic_session.rs)
+
+FreeRTOS 共用桥接接收调用方提供的任务名称、优先级、栈和静态控制块，并提供中断通知和任务等待。固件负责移植端口、时钟和中断配置，继续管理 BLE、Idle 和中断主栈的预留、链接位置与启动故障诊断。[共用桥接](../../runtimes/freertos/moteframe_freertos.h) · [FR8029D 接入](freertos/fr29_freertos.c)
+
+| MIC1 构建 | M3 → M3.1 镜像载荷（B） | 静态 RAM（B） | 栈总预留（B） |
+|---|---:|---:|---:|
+| 裸机 SRAM | 66,556 → 66,860 | 280 | 16,128 |
+| FreeRTOS SRAM | 69,724 → 70,028 | 632 | 15,360 |
+| 裸机 Flash | 70,688 → 71,064 | 704 | 22,272 |
+| FreeRTOS Flash | 73,888 → 74,264 | 1,056 | 19,200 |
+
+静态 RAM 和栈总预留与 M3 一致。引入共用 FreeRTOS 桥接前后，四个镜像的载荷大小、静态 RAM 和栈预留一致。标准、长包和两种 OTA 构建均通过现有链接预算。
+
+同一台 Mac 对两种 SRAM 镜像各完成两轮连接、带响应写入和 20 B 原样 Notify，再采集至少 60 秒。两版均生成并收齐 1,507 个上报样本，序号缺口、软件覆盖和 FIFO 异常观测均为零。J-Link 从同轮测试读取水位，原厂 Flash 前缀在每轮复位后回读一致。
+
+| SRAM 栈水位 | M3 剩余（B） | M3.1 剩余（B） |
+|---|---:|---:|
+| 裸机主栈 | 6,276 | 6,236 |
+| FreeRTOS BLE 任务栈 | 3,964 | 3,924 |
+| FreeRTOS 中断主栈 | 368 | 368 |
+| FreeRTOS Idle 栈 | 944 | 944 |
+
+#### MIC1 分层后的 Flash 复测
+
+J-Link 保持开发板供电，经 Boot ROM 复位启动两种 XIP 镜像。同一台 Mac 各做两轮重连和 20 B 写入、Notify 回显，再采集 60 秒。裸机生成并收齐 1,509 个样本，FreeRTOS 生成并收齐 1,510 个，序号缺口、缓存覆盖和 FIFO 异常观测均为零。裸机主栈剩余 12,380 B。FreeRTOS BLE 任务栈剩余 6,448 B，中断主栈和 Idle 栈分别剩余 1,648 B 和 944 B。
+
+首次 FreeRTOS 测试在 Mac 报告断开后很快复位，读回默认值 4，A/B 均为空。复测先等待板端断连并回读两槽，再复位。两版在连接期间依次将抽取因子设为 6、12、8，均即时生效、待保存。断连后槽 A 保存第 1 代和值 8，槽 B 为空，槽外内容与安装镜像一致。复位后 Mac 读回 8，待保存标志已清除。
+
+测试后恢复 SDK v0.3.6。两轮各自的 1,048,576 B 全片读回与备份逐字节一致，写保护读回 `SR1=0x7C`、`SR2=0x02`。
+
+#### QSPI 驱动和产品分区
+
+芯片 crate 校验 QSPI0、P25Q80 和写保护，提供物理读写。擦写期间使用原有 SRAM 汇编路径。固件通过 `QspiSlots` 核对链接末地址和配置槽边界，经 OTA 接口核对暂存和安装标记范围。[QSPI 芯片驱动](../../chips/freqchip/fr802x/fr8029d/src/qspi/hardware.rs) · [分区接入](src/qspi_slots.rs)
+
+四种 MIC1 镜像均按原预算构建。与 MIC1 分层版相比，裸机和 FreeRTOS Flash 载荷分别为 71,320 B 和 74,520 B，各增加 256 B。两版的静态 RAM、栈预留和 SRAM 镜像保持一致。长包和 OTA 构建均通过。
+
+寄存器模型和模拟 NOR 的八种组合通过回归，覆盖分区越界、延后保存、跨页连续中断后的再次提交和写保护。寄存器模型中的 300 B 配置保存栈写痕为 912 B，使用自带缓冲的用例为 1,264 B。
+
+拆分后的两版均在实板上完成两次配置提交。首次断连后槽 A 为第 1 代、值 8，槽 B 为空。第二次断连后槽 B 为第 2 代、值 9，槽 A 逐字节保持一致。槽外回读与写入的试验镜像一致，含 FlashEnv、OTA 暂存区及安装头。两版经 Boot ROM 复位后，Mac 均读回 9 且无待保存标志，并通过 20 B 写入、Notify 回显和重连。裸机主栈余量为 12,380 B，FreeRTOS BLE 任务栈余量为 6,448 B。
+
+裸机首次短采集生成 230 个样本，Mac 收到 224 个，序号缺口和环形覆盖均为 6。故障轮恢复前的回读确认 A 槽第 1 代已提交。用同一 ELF 增加 Mac 请求时间记录后重测，两次分别收齐 208 和 181 个样本，环形覆盖和序号缺口均为零。两轮取批响应的最大间隔分别为 211 ms 和 571 ms。首次覆盖发生时的请求间隔待后续捕获。
+
+每轮试验均恢复 SDK v0.3.6，1,048,576 B 全片与试验前备份逐字节一致，写保护读回 `SR1=0x7C`、`SR2=0x02`。板上复位期间保持供电。真实断电再次启动和擦写中掉电后恢复仍待单独板测。
+
+#### M3.1 收尾与射频拆分复测
+
+使用同一台 Mac 和 FR8029D EVB。先验收拆分前两种最新 MIC1 Flash 镜像，再迁移校准、基带初始化、交换 RAM、PHY 控制字和时隙操作。固件继续负责广播与连接事件调度，裸机与 FreeRTOS 共用芯片后端。两版 XIP 的校准读取例程均链接到 SRAM，反汇编确认 QSPI 命令执行期间的轮询留在该例程内。[芯片射频驱动](../../chips/freqchip/fr802x/fr8029d/src/radio/hardware.rs) · [固件射频适配](src/gatt_board_radio.rs)
+
+| MIC1 构建 | 拆分前 → 拆分后载荷（B） | 静态 RAM（B） | 栈预留总计（B） |
+|---|---:|---:|---:|
+| 裸机 SRAM | 66,764 → 66,828 | 280 | 16,128 |
+| FreeRTOS SRAM | 69,932 → 69,996 | 632 | 15,360 |
+| 裸机 Flash | 71,160 → 71,168 | 704 | 22,272 |
+| FreeRTOS Flash | 74,360 → 74,368 | 1,056 | 19,200 |
+
+裸机 Flash 预算为 71,680 B，实测镜像余 512 B。FreeRTOS Flash 预算为 75,776 B，实测镜像余 1,408 B。静态 RAM 和栈预留前后一致。标准短包、可选 251 B 长包和两种 OTA 维护镜像沿用现有链接预算。
+
+**PHY 实机结果。** 拆分后用 SRAM 探针验证四个组合。每组完成首次连接和重连，各用带响应写入发送不同的 20 B，Mac 均收到原样 Notify，J-Link 读到不同会话的链路层确认。确认时的 PHY 寄存器值，固定 1M 两版均为 0，允许 2M 的两版均为 5（双向 2M）。
+
+| SRAM 试验 | 首次连接、重连及回显 | 主栈余量（B） | BLE 任务栈余量（B） | Idle 余量（B） |
+|---|---:|---:|---:|---:|
+| 裸机，固定 1M | 2 / 2 | 6,236 | — | — |
+| 裸机，协商 2M | 2 / 2 | 6,236 | — | — |
+| FreeRTOS，固定 1M | 2 / 2 | 368 | 3,924 | 944 |
+| FreeRTOS，协商 2M | 2 / 2 | 368 | 3,888 | 944 |
+
+两组 FreeRTOS 试验中 BLE 任务栈的最低余量为 3,888 B，通过 512 B 门槛。主机回归覆盖连接中按约定事件降速；本轮 Mac 板测覆盖固定 1M 和协商 2M。SRAM 试验结束后均复位回原固件，Flash 前缀回读一致。
+
+**Flash 结果。** 每个镜像先做两轮 BLE 连接与 20 B 写入、原样 Notify，再在同一台 Mac 连续采集约 60 秒。采集中依次写入抽取因子 6、12、8，保持连接时均即时生效且显示待保存。等待板端确认断连后，槽 A 为第 1 代、值为 8，槽 B 保持擦除态，槽外与试验镜像逐字节一致。Boot ROM 复位后，Mac 读回 8，待保存标志已清除。
+
+| Flash 试验 | ELF SHA-256 前缀 | 板端生成 / Mac 收到 | 主栈余量（B） | BLE 任务栈余量（B） |
+|---|---|---:|---:|---:|
+| 裸机，拆分前 | `09760ef957a5` | 1,508 / 1,508 | 12,380 | — |
+| FreeRTOS，拆分前 | `965d27228d9a` | 1,507 / 1,507 | 1,648 | 6,448 |
+| 裸机，拆分后 | `1edaf68b8256` | 1,507 / 1,507 | 12,380 | — |
+| FreeRTOS，拆分后 | `471770879285` | 1,510 / 1,510 | 1,648 | 6,448 |
+
+各轮序号缺口、软件覆盖和 FIFO 异常观测均为零。每轮结束后恢复 SDK v0.3.6，1,048,576 B 全片与各轮试验前备份逐字节一致，SHA-256 为 `072524958e690a560a70e50ef64ac6d3992aaa8c908ff240d7042cc0d577b5ed`，写保护回读为 SR1=`0x7C`、SR2=`0x02`。本轮复位期间开发板维持供电。真实断电冷启动和擦写中断电仍待独立验证。

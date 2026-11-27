@@ -1,18 +1,13 @@
-//! Cold radio bootstrap for the FR8029D bring-up probe.
-//!
-//! The modem profile is bounded to the observed FR8029D silicon and the
-//! version-2 factory trim layout. See the bring-up README for evidence.
+//! FR8029D cold radio startup and factory calibration application.
 
-use fr8029d_bringup::radio_trim::{RadioTrim, TRIM_BYTES, TrimError};
-
-use crate::{read8, read32, write8, write32};
+use super::{BASEBAND, PACKET_RAM, read8, read32, write8, write32};
+use crate::radio::trim::{RadioTrim, TRIM_BYTES, TrimError};
 
 const QSPI: usize = 0xe00a_4000;
 const APB0_CLOCK: usize = 0xe005_3024;
 const RADIO_CLOCK: usize = 0xe005_5000;
 const MODEM: usize = 0x500a_0000;
 const CALIBRATION_BANK: usize = MODEM + 0x1da;
-const BASEBAND: usize = 0x4000_0000;
 
 const QSPI_IDLE: u32 = 1 << 31;
 const CMD_REGISTER: usize = QSPI + 0x90;
@@ -21,37 +16,32 @@ const JEDEC_READ: u32 = 0x9fa0_0000;
 // P25Q80 Read Security Register, 3 address bytes, one dummy byte, 8 result bytes.
 const SECURITY_READ: u32 = 0x48fa_0080;
 
-pub(super) fn init() -> Result<(), u32> {
-    let trim = read_trim()?;
+pub(super) fn init<const WAIT_FOR_IDLE: bool, const MASK_IRQ: bool>() -> Result<(), u32> {
+    let trim = read_trim::<WAIT_FOR_IDLE, MASK_IRQ>()?;
     enable_clocks()?;
     configure_modem(&trim);
     configure_baseband()
 }
 
 // The XIP build must keep polling inside the SRAM-resident transaction.
-#[cfg_attr(
-    feature = "ble-adv-cold-xip",
-    inline(always),
-    allow(clippy::inline_always)
-)]
+#[cfg_attr(feature = "radio-xip", inline(always), allow(clippy::inline_always))]
 fn wait_register(address: usize, mask: u32, value: u32) -> bool {
     (0..32_768).any(|_| read32(address) & mask == value)
 }
 
-fn qspi_command(command: u32) -> Result<(), u32> {
-    // The FreeRTOS tick and exception vectors also execute from Flash in XIP.
-    #[cfg(all(feature = "ble-gatt-freertos", feature = "ble-gatt-xip"))]
-    {
-        critical_section::with(|_| qspi_transaction(command))
+fn qspi_command<const WAIT_FOR_IDLE: bool, const MASK_IRQ: bool>(command: u32) -> Result<(), u32> {
+    // The caller selects masking when its scheduler can interrupt the XIP image.
+    if MASK_IRQ {
+        critical_section::with(|_| qspi_transaction::<WAIT_FOR_IDLE>(command))
+    } else {
+        qspi_transaction::<WAIT_FOR_IDLE>(command)
     }
-    #[cfg(not(all(feature = "ble-gatt-freertos", feature = "ble-gatt-xip")))]
-    qspi_transaction(command)
 }
 
 // XIP cannot fetch instructions while a QSPI software transaction is active.
-#[cfg_attr(feature = "ble-adv-cold-xip", unsafe(link_section = ".ramfunc.qspi"))]
+#[cfg_attr(feature = "radio-xip", unsafe(link_section = ".ramfunc.qspi"))]
 #[inline(never)]
-fn qspi_transaction(command: u32) -> Result<(), u32> {
+fn qspi_transaction<const WAIT_FOR_IDLE: bool>(command: u32) -> Result<(), u32> {
     if !wait_register(QSPI, QSPI_IDLE, QSPI_IDLE) || !wait_register(CMD_REGISTER, CMD_BUSY, 0) {
         return Err(10);
     }
@@ -59,17 +49,18 @@ fn qspi_transaction(command: u32) -> Result<(), u32> {
     write32(CMD_REGISTER, command | 1);
     if !wait_register(CMD_REGISTER, CMD_BUSY, 0) {
         // On timeout the Flash caller still cannot be fetched until the command ends.
-        #[cfg(feature = "ble-gatt-xip")]
-        while read32(CMD_REGISTER) & CMD_BUSY != 0 {
-            core::hint::spin_loop();
+        if WAIT_FOR_IDLE {
+            while read32(CMD_REGISTER) & CMD_BUSY != 0 {
+                core::hint::spin_loop();
+            }
         }
         return Err(10);
     }
     Ok(())
 }
 
-fn read_trim() -> Result<RadioTrim, u32> {
-    qspi_command(JEDEC_READ)?;
+fn read_trim<const WAIT_FOR_IDLE: bool, const MASK_IRQ: bool>() -> Result<RadioTrim, u32> {
+    qspi_command::<WAIT_FOR_IDLE, MASK_IRQ>(JEDEC_READ)?;
     if read32(QSPI + 0xa0) & 0xff_ffff != 0x14_60_85 {
         return Err(11);
     }
@@ -80,7 +71,7 @@ fn read_trim() -> Result<RadioTrim, u32> {
             QSPI + 0x94,
             0x1000 + u32::try_from(index * 8).map_err(|_| 10_u32)?,
         );
-        qspi_command(SECURITY_READ)?;
+        qspi_command::<WAIT_FOR_IDLE, MASK_IRQ>(SECURITY_READ)?;
         pair[..4].copy_from_slice(&read32(QSPI + 0xa0).to_le_bytes());
         pair[4..].copy_from_slice(&read32(QSPI + 0xa4).to_le_bytes());
     }
@@ -98,6 +89,8 @@ fn update8(address: usize, mask: u8, value: u8) {
     write8(address, (read8(address) & !mask) | value);
 }
 
+#[inline(always)]
+#[allow(clippy::inline_always)]
 fn enable_clocks() -> Result<(), u32> {
     // Boot ROM leaves the MCU on 24 MHz. Select that clock for the
     // baseband and divide by two, then expose the modem and exchange RAM.
@@ -115,6 +108,8 @@ fn enable_clocks() -> Result<(), u32> {
     Ok(())
 }
 
+#[inline(always)]
+#[allow(clippy::inline_always)]
 fn configure_modem(trim: &RadioTrim) {
     // FR8029D modem profile as observed at the packet TX interface.
     // Byte writes preserve unrelated status and control bits.
@@ -218,12 +213,12 @@ pub(super) fn configure_baseband() -> Result<(), u32> {
     }
     write32(BASEBAND, 0x0010_0607);
     // Clear volatile exchange memory before the event scheduler can own it.
-    for address in (0x4001_0000..0x4001_4000).step_by(4) {
+    for address in (PACKET_RAM..PACKET_RAM + 0x4000).step_by(4) {
         write32(address, 0);
     }
     // The controller's RF table is indexed by ascending center frequency.
     for channel in 0_u8..40 {
-        write8(0x4001_0100 + usize::from(channel), 2 * channel);
+        write8(PACKET_RAM + 0x100 + usize::from(channel), 2 * channel);
     }
     // BLE 1M timing and the PHY interface. The free-running slot clock,
     // submit port, status and RX queue pointers are intentionally excluded.

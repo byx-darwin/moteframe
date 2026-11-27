@@ -79,7 +79,10 @@ mod arm {
     use embassy_time_driver::Driver;
     #[cfg(not(feature = "ble-gatt-event-driven"))]
     use fr8029d_bringup::gatt_runner::run as run_gatt;
-    #[cfg(all(feature = "ble-gatt-event-driven", not(feature = "ble-gatt-ota")))]
+    #[cfg(all(
+        feature = "ble-gatt-event-driven",
+        not(any(feature = "ble-gatt-ota", feature = "mic1-acquisition"))
+    ))]
     use fr8029d_bringup::gatt_runner::run_event_driven as run_gatt;
     use fr8029d_bringup::gatt_runner::{GattIdentity, GattReport, GattRunError, Resources};
     #[cfg(feature = "ble-gatt-event-driven")]
@@ -261,6 +264,10 @@ mod arm {
     }
 
     #[inline(never)]
+    #[allow(
+        clippy::too_many_lines,
+        reason = "Keep the controller and application future pinned in the foreground stack frame"
+    )]
     pub(crate) fn run<B: LinkBackend<Error = u32>>(backend: B) -> ! {
         for index in PHASE..=CLOCK_FAULT {
             diagnostic(index, 0);
@@ -312,10 +319,28 @@ mod arm {
                 |event| report.record(event),
                 &mut receive
             ));
-            #[cfg(not(feature = "ble-gatt-ota"))]
+            #[cfg(not(any(feature = "ble-gatt-ota", feature = "mic1-acquisition")))]
             let mut app = pin!(run_gatt(backend, &mut resources, identity, |event| {
                 report.record(event);
             }));
+            #[cfg(feature = "mic1-acquisition")]
+            // SAFETY: This runner owns SARADC on the FR8029D EVB. In the
+            // layout-v1 image, reset has copied the SRAM commands, both
+            // config slots are dedicated to this session, and QSPI is
+            // reserved before advertising and after a confirmed disconnect.
+            // The image forbids OTA and requires no competing DMA or debugger.
+            let mic1 = unsafe { fr8029d_bringup::mic_session::MicSession::new() };
+            #[cfg(feature = "mic1-acquisition")]
+            let mut app = pin!(
+                fr8029d_bringup::gatt_runner::run_event_driven_with_application(
+                    backend,
+                    &mut resources,
+                    identity,
+                    |event| report.record(event),
+                    None,
+                    mic1,
+                )
+            );
             #[cfg(feature = "ble-gatt-event-driven")]
             let waker = wake::waker();
             #[cfg(feature = "ble-gatt-event-driven")]
@@ -349,7 +374,7 @@ mod arm {
                     let host = critical_section::with(|cs| HOST_DEADLINE.borrow(cs).get());
                     let delay = next_delay_us(now, now_us, radio, host);
                     #[cfg(feature = "mic1-acquisition")]
-                    let delay = fr8029d_bringup::gatt_runner::acquisition_wake_delay(delay);
+                    let delay = fr8029d_bringup::mic_session::acquisition_wake_delay(delay);
                     wake::wait(
                         delay,
                         matches!(radio, Some(RadioDeadline::Completion { .. })),

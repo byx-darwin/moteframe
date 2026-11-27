@@ -275,8 +275,13 @@ def build_images():
     # A private crate copy keeps all synthetic addresses and entry points out
     # of deployable firmware. Do not change the board linker script or opt level.
     with tempfile.TemporaryDirectory() as temp:
-        crate = Path(temp) / board.name
+        devices = Path(temp) / "devices"
+        crate = devices / "firmware" / board.name
         shutil.copytree(board, crate, ignore=shutil.ignore_patterns("target", "tools"))
+        shutil.copytree(
+            board.parents[1] / "runtimes" / "freertos",
+            devices / "runtimes" / "freertos",
+        )
         manifest = crate / "Cargo.toml"
         manifest.write_text(
             re.sub(

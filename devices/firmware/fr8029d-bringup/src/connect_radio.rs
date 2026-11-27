@@ -3,10 +3,10 @@
 #[cfg(not(feature = "ble-gatt-board"))]
 use super::{CLOCK_MASK, connect_probe::Receiver};
 use super::{
-    IRQ_ACK, IRQ_EVENT_END, IRQ_STATUS, PACKET_RAM, SUBMIT, diagnostic, exchange_slot, read32,
-    status_slot, write_record, write32,
+    PACKET_RAM, diagnostic,
+    radio_hardware::{scheduler_fault, submit_slot, take_event_end},
+    status_slot, write_record,
 };
-use core::sync::atomic::{Ordering, fence};
 #[cfg(not(feature = "ble-gatt-board"))]
 use fr8029d_bringup::connection::PacketTime;
 use fr8029d_bringup::{
@@ -48,9 +48,7 @@ pub(super) fn submit_link(slot: u32, event: ConnectionEvent, counter: u16) -> u1
 }
 
 pub(super) fn submit(slot: u32, words: &[u16; 8]) {
-    write_record(exchange_slot(slot), words);
-    fence(Ordering::Release);
-    write32(SUBMIT, 0x8000_0000 | slot);
+    submit_slot(slot, words);
 }
 
 #[cfg(not(feature = "ble-gatt-board"))]
@@ -113,16 +111,15 @@ pub(super) fn probe_link(
 }
 
 pub(super) fn read_end(slot: u32) -> Result<Option<u32>, u32> {
-    if read32(0x4000_0010) & (1 << 16) != 0 {
-        diagnostic(15, read32(0x4000_0060));
+    if let Some(error) = scheduler_fault() {
+        diagnostic(15, error);
         return Err(15);
     }
-    if read32(IRQ_STATUS) & IRQ_EVENT_END != 0 {
-        let status = read32(super::EVENT_STATUS);
-        write32(IRQ_ACK, IRQ_EVENT_END);
-        if status & 2 != 0 && status_slot(status) == slot {
-            return Ok(Some(status));
-        }
+    if let Some(status) = take_event_end()
+        && status & 2 != 0
+        && status_slot(status) == slot
+    {
+        return Ok(Some(status));
     }
     Ok(None)
 }

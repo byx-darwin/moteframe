@@ -2,8 +2,6 @@
 #![no_std]
 #![no_main]
 
-#[cfg(not(feature = "ble-gatt-board"))]
-use core::sync::atomic::{Ordering, fence};
 use core::{
     arch::{asm, global_asm},
     panic::PanicInfo,
@@ -19,11 +17,11 @@ use fr8029d_bringup::advertising::{
 use fr8029d_bringup::advertising::{TX_OFFSET, advertising_control, tx_descriptor};
 use fr8029d_bringup::{
     XIP_ENTRY,
-    advertising::{CLOCK_MASK, SLOT_STRIDE, status_slot},
+    advertising::{CLOCK_MASK, status_slot},
 };
 
 #[cfg(any(
-    all(feature = "ble-gatt-board", not(feature = "ble-gatt-xip")),
+    all(feature = "ble-connect-probe", not(feature = "ble-gatt-xip")),
     feature = "ble-gatt-xip-compact"
 ))]
 global_asm!(include_str!("compact_memory.s"), options(raw));
@@ -36,8 +34,9 @@ global_asm!(
     event_wake = const cfg!(all(feature = "ble-gatt-board", feature = "ble-gatt-event-driven")) as u8,
 );
 
-#[cfg(feature = "ble-adv-cold")]
-mod cold_radio;
+mod radio_hardware;
+use fr8029d_chip::radio::PACKET_RAM;
+use radio_hardware::{clock, write_record};
 
 #[cfg(feature = "ble-connect-probe")]
 mod connect_probe;
@@ -50,30 +49,20 @@ mod gatt_board_time;
 #[cfg(all(feature = "ble-gatt-board", feature = "ble-gatt-event-driven"))]
 mod gatt_board_wake;
 
-#[cfg(feature = "ble-adv-cold")]
-fn read8(address: usize) -> u8 {
-    // SAFETY: Cold initialization uses only byte-addressed MMIO registers.
-    unsafe { read_volatile(address as *const u8) }
-}
-
-#[cfg(feature = "ble-adv-cold")]
+#[cfg(all(feature = "ble-gatt-event-driven", feature = "ble-gatt-board"))]
 fn write8(address: usize, value: u8) {
-    // SAFETY: Cold initialization uses only byte-addressed MMIO registers.
+    // SAFETY: The board wake code uses this for local NVIC priorities.
     unsafe { write_volatile(address as *mut u8, value) };
 }
 
-const PACKET_RAM: usize = 0x4001_0000;
 #[cfg(not(feature = "ble-gatt-board"))]
 const BASEBAND_ID: usize = 0x4000_0004;
 #[cfg(not(feature = "ble-gatt-board"))]
 const IRQ_MASK: usize = 0x4000_0018;
-const IRQ_STATUS: usize = 0x4000_001c;
-const IRQ_ACK: usize = 0x4000_0020;
-const EVENT_STATUS: usize = 0x4000_0024;
-const CLOCK: usize = 0x4000_0100;
-const SUBMIT: usize = 0x4000_0110;
-const IRQ_EVENT_END: u32 = 1 << 15;
-const CLOCK_LATCH: u32 = 1 << 31;
+#[cfg(any(not(feature = "ble-gatt-board"), feature = "ble-gatt-event-driven"))]
+use fr8029d_chip::radio::IRQ_EVENT_END;
+#[cfg(all(feature = "ble-gatt-board", feature = "ble-gatt-event-driven"))]
+use fr8029d_chip::radio::IRQ_STATUS;
 #[cfg(not(feature = "ble-adv-cold"))]
 const EVENT_LIMIT: u32 = 460;
 #[cfg(not(feature = "ble-adv-cold"))]
@@ -98,34 +87,16 @@ unsafe extern "C" {
     fn fr29_freertos_start(entry: extern "C" fn(*mut core::ffi::c_void));
 }
 
-// Keep the MMIO access inside the SRAM-resident QSPI transaction.
-#[cfg_attr(
-    feature = "ble-adv-cold-xip",
-    inline(always),
-    allow(clippy::inline_always)
-)]
+#[cfg(any(not(feature = "ble-gatt-board"), feature = "ble-gatt-event-driven"))]
 fn read32(address: usize) -> u32 {
-    // SAFETY: Call sites use only word-aligned FR8029D baseband registers mapped on the pinned board.
+    // SAFETY: Call sites use word-aligned registers mapped on the pinned board.
     unsafe { read_volatile(address as *const u32) }
 }
 
-#[cfg_attr(
-    feature = "ble-adv-cold-xip",
-    inline(always),
-    allow(clippy::inline_always)
-)]
+#[cfg(all(feature = "ble-gatt-board", feature = "ble-gatt-event-driven"))]
 fn write32(address: usize, value: u32) {
-    // SAFETY: Call sites use only the documented command and acknowledgement registers, with IRQs masked.
+    // SAFETY: Call sites use the board interrupt and wake timer registers.
     unsafe { write_volatile(address as *mut u32, value) };
-}
-
-fn write_record(base: usize, words: &[u16]) {
-    // SAFETY: Callers supply aligned, nonoverlapping fixed Packet RAM records during exclusive ownership.
-    unsafe {
-        for (index, &value) in words.iter().enumerate() {
-            write_volatile((base as *mut u16).add(index), value);
-        }
-    }
 }
 
 fn diagnostic(index: usize, value: u32) {
@@ -147,17 +118,6 @@ fn increment(index: usize) {
     diagnostic(index, previous.saturating_add(1));
 }
 
-fn clock() -> Option<u32> {
-    write32(CLOCK, read32(CLOCK) | CLOCK_LATCH);
-    for _ in 0..1024 {
-        let time = read32(CLOCK);
-        if time & CLOCK_LATCH == 0 {
-            return Some(time & CLOCK_MASK);
-        }
-    }
-    None
-}
-
 #[cfg(not(feature = "ble-gatt-board"))]
 fn delay_ticks(ticks: u32) -> Option<u32> {
     let start = clock()?;
@@ -170,30 +130,27 @@ fn delay_ticks(ticks: u32) -> Option<u32> {
     None
 }
 
+#[cfg(not(feature = "ble-gatt-board"))]
 fn exchange_slot(index: u32) -> usize {
-    PACKET_RAM + index as usize * SLOT_STRIDE
+    PACKET_RAM + index as usize * fr8029d_chip::radio::SLOT_STRIDE
 }
 
 #[cfg(not(feature = "ble-gatt-board"))]
 fn wait_event(index: u32) -> Result<(), u32> {
     for _ in 0..300_000 {
         #[cfg(feature = "ble-adv-cold")]
-        if read32(0x4000_0010) & (1 << 16) != 0 {
-            diagnostic(15, read32(0x4000_0060));
+        if let Some(error) = radio_hardware::scheduler_fault() {
+            diagnostic(15, error);
             return Err(15);
         }
-        let irq = read32(IRQ_STATUS);
-        if irq & IRQ_EVENT_END == 0 {
+        let Some(status) = radio_hardware::take_event_end() else {
             continue;
-        }
-        let status = read32(EVENT_STATUS);
-        write32(IRQ_ACK, IRQ_EVENT_END);
+        };
         diagnostic(6, status);
         if status & 2 == 0 || status_slot(status) != index {
             continue;
         }
-        // SAFETY: index is masked to the 16 hardware entries. The status flag is a halfword.
-        let flags = unsafe { read_volatile(exchange_slot(index) as *const u16) };
+        let flags = radio_hardware::packet_halfword(exchange_slot(index));
         diagnostic(7, u32::from(flags));
         return if slot_complete(flags) { Ok(()) } else { Err(5) };
     }
@@ -206,7 +163,7 @@ fn advertise(boot_vtor: u32) -> Result<(), u32> {
         return Err(2);
     }
     #[cfg(feature = "ble-adv-cold")]
-    cold_radio::init()?;
+    radio_hardware::initialize()?;
 
     if read32(BASEBAND_ID) != 0x1949_1001 || read32(IRQ_MASK) & IRQ_EVENT_END == 0 {
         return Err(2);
@@ -217,8 +174,8 @@ fn advertise(boot_vtor: u32) -> Result<(), u32> {
     #[cfg(feature = "ble-adv-cold")]
     let mut index = 0;
     #[cfg(not(feature = "ble-adv-cold"))]
-    let mut index = (read32(SUBMIT) + 1) & 15;
-    write32(IRQ_ACK, IRQ_EVENT_END);
+    let mut index = (radio_hardware::pending_slot() + 1) & 15;
+    radio_hardware::clear_completed_event();
     #[cfg(feature = "ble-connect-probe")]
     let (control, adv_data) = (
         connectable_control(CONNECTABLE_ADDRESS),
@@ -233,11 +190,8 @@ fn advertise(boot_vtor: u32) -> Result<(), u32> {
     );
     write_record(PACKET_RAM + usize::from(CONTROL_OFFSET), &control);
     let payload_address = PACKET_RAM + usize::from(TX_PAYLOAD_OFFSET);
-    // SAFETY: The payload fits the fixed Packet RAM buffer, which has not been submitted.
-    unsafe {
-        for (index, &byte) in adv_data.iter().enumerate() {
-            write_volatile((payload_address as *mut u8).add(index), byte);
-        }
+    for (index, &byte) in adv_data.iter().enumerate() {
+        radio_hardware::set_packet_byte(payload_address + index, byte);
     }
     #[cfg(feature = "ble-connect-probe")]
     let mut receiver = connect_probe::Receiver::start();
@@ -256,8 +210,7 @@ fn advertise(boot_vtor: u32) -> Result<(), u32> {
         diagnostic(12, read32(0x4000_0144));
         diagnostic(13, read32(0x4000_0150));
         diagnostic(14, read32(0x4000_0000));
-        fence(Ordering::Release);
-        write32(SUBMIT, 0x8000_0000 | index);
+        radio_hardware::arm_slot(index);
         diagnostic(2, 1);
         diagnostic(3, count + 1);
         diagnostic(8, index);
@@ -299,11 +252,9 @@ extern "C" fn fr8029d_probe_main(boot_vtor: u32) -> ! {
             park();
         }
         #[cfg(feature = "ble-gatt-xip")]
-        if !boot_protection::ensure(|command, value| {
-            // SAFETY: Reset_Handler copied the QSPI routine to SRAM and masked
-            // interrupts. No task, radio or other Flash owner has started yet.
-            unsafe { fr29_slot_command(command, 0, value as usize, protection_stall) }
-        }) {
+        // SAFETY: Reset_Handler copied the QSPI routine to SRAM and masked
+        // interrupts. No task, radio or other Flash owner has started yet.
+        if !unsafe { fr8029d_chip::qspi::restore_boot_protection(protection_stall) } {
             diagnostic(2, 0x5052);
             park();
         }
@@ -357,17 +308,6 @@ fn park() -> ! {
 
 #[cfg(all(feature = "qspi-config", not(feature = "mic1-config-layout-v1")))]
 pub mod qspi_slots;
-
-#[cfg(feature = "ble-gatt-xip")]
-mod boot_protection;
-
-#[cfg(all(feature = "ble-gatt-xip", not(feature = "qspi-config")))]
-global_asm!(include_str!("qspi_slots.s"), options(raw));
-
-#[cfg(feature = "ble-gatt-xip")]
-unsafe extern "C" {
-    fn fr29_slot_command(op: u32, address: u32, data: usize, stall: extern "C" fn() -> !) -> u32;
-}
 
 #[cfg(feature = "ble-gatt-xip")]
 #[unsafe(link_section = ".ramfunc.protection_stall")]

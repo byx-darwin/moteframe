@@ -1,10 +1,13 @@
 //! Capture of connection requests received by the legacy advertiser.
 
-use super::{PACKET_RAM, diagnostic, increment, read8, read32, write_record, write32};
-#[cfg(test)]
-use super::{test_halfword as halfword, test_set_halfword as set_halfword};
-#[cfg(not(test))]
-use core::ptr::{read_volatile, write_volatile};
+use super::{
+    PACKET_RAM, diagnostic, increment,
+    radio_hardware::{
+        packet_byte, packet_halfword as halfword, packet_word, set_packet_halfword as set_halfword,
+        set_rx_queue,
+    },
+    write_record,
+};
 use core::sync::atomic::{Ordering, fence};
 #[cfg(feature = "ble-gatt-dle")]
 use fr8029d_bringup::advertising::receive_descriptor;
@@ -15,7 +18,6 @@ use fr8029d_bringup::advertising::{
 };
 use fr8029d_bringup::connection::{ConnectionRequest, PacketTime};
 
-const RX_QUEUE: usize = 0x4000_0028;
 const RX_READY: u16 = 1 << 15;
 const INVALID_ADV_STATUS: u16 = 0x003d;
 const CONNECT_REQUEST_BYTES: usize = 34;
@@ -69,7 +71,7 @@ const _: () = assert!(RX_COUNT <= u8::BITS as usize);
 #[cfg(feature = "ble-gatt-dle")]
 impl RxBuffer {
     pub(super) fn byte(&self, index: usize) -> u8 {
-        read8(PACKET_RAM + usize::from(self.offset) + index)
+        packet_byte(PACKET_RAM + usize::from(self.offset) + index)
     }
 
     pub(super) fn release(self, receiver: &mut Receiver) {
@@ -98,7 +100,7 @@ impl Receiver {
             header: halfword(address + 4),
             status: halfword(address + 2),
             time: PacketTime {
-                coarse: read32(address + 8) & super::CLOCK_MASK,
+                coarse: packet_word(address + 8) & super::CLOCK_MASK,
                 fine_countdown: fine & 0x03ff,
             },
             link_id: fine >> 11,
@@ -154,8 +156,7 @@ impl Receiver {
             write_record(descriptor(index), record);
         }
         fence(Ordering::Release);
-        write32(RX_QUEUE + 4, 0);
-        write32(RX_QUEUE, u32::from(RX_OFFSET / 4));
+        set_rx_queue(RX_OFFSET);
         Self {
             #[cfg(not(feature = "ble-gatt-dle"))]
             buffers: ring.map(|record| record[10]),
@@ -207,7 +208,7 @@ impl Receiver {
             header,
             status,
             time: PacketTime {
-                coarse: read32(address + 8) & super::CLOCK_MASK,
+                coarse: packet_word(address + 8) & super::CLOCK_MASK,
                 fine_countdown: fine & 0x03ff,
             },
             link_id: fine >> 11,
@@ -216,7 +217,7 @@ impl Receiver {
         let length = usize::from(header >> 8);
         if length <= packet.payload.len() {
             for (index, byte) in packet.payload[..length].iter_mut().enumerate() {
-                *byte = read8(PACKET_RAM + usize::from(buffer) + index);
+                *byte = packet_byte(PACKET_RAM + usize::from(buffer) + index);
             }
         }
         fence(Ordering::Release);
@@ -289,16 +290,4 @@ impl Receiver {
 
 fn descriptor(index: usize) -> usize {
     PACKET_RAM + usize::from(RX_OFFSET) + index * RX_WORDS * size_of::<u16>()
-}
-
-#[cfg(not(test))]
-fn set_halfword(address: usize, value: u16) {
-    // SAFETY: The event returned this aligned RX descriptor to the CPU.
-    unsafe { write_volatile(address as *mut u16, value) };
-}
-
-#[cfg(not(test))]
-fn halfword(address: usize) -> u16 {
-    // SAFETY: All call sites read aligned halfwords in the installed ring.
-    unsafe { read_volatile(address as *const u16) }
 }
