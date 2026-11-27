@@ -309,7 +309,7 @@ python3 tools/gatt_notify_memory.py flash-bin "$BOARD_FLASH_BACKUP" \
 
 Mac 验收使用 `ble-gatt-mac-probe` 特性构建 SRAM 镜像。两版沿用 14 字节主广播，分别发布测试标记 `MFR29A1`（裸机）和 `MFR29R1`（FreeRTOS）。标记位于 `0xFFFF` 测试厂商字段中，连接后可读取原有 GAP 设备名。这个模式为连接接收窗口每侧预留 1.024 ms 固定保护时间，再加上按时钟精度计算的余量。普通构建和 Flash 执行版使用名称广播及原有接收时序。
 
-Mac 测试镜像请求 30 ms 的广播间隔，再加入基带调度所用的随机延迟。关闭长包时，裸机版的链路层发送载荷上限为 27 字节，FreeRTOS 的 Mac SRAM 测试镜像使用 15 字节上限，控制器在最后一片收到确认后返还整包的发送额度。两种标准配置的 Host ACL 缓冲区均为 27 字节。FreeRTOS 事件驱动的 Mac 测试镜像为中断主栈预留 512 B，BLE 和 Idle 任务栈分别预留 13 KiB 和 1 KiB。
+Mac 测试镜像请求 30 ms 的广播间隔，再加入基带调度所用的随机延迟。关闭长包时，裸机版的链路层发送载荷上限为 27 字节，FreeRTOS 的 Mac SRAM 测试镜像使用 15 字节上限，控制器在最后一片收到确认后返还整包的发送额度。两种标准配置的 Host ACL 缓冲区均为 27 字节。FreeRTOS 事件驱动的 Mac 测试镜像为中断主栈预留 512 B，短包版 BLE 和 Idle 任务栈分别预留 13.5 KiB 和 1 KiB。
 
 2026-11-26 在校准数据版本为 2 的 FR8029D 上，Rust 冷启动初始化按 SDK v0.3.6 的配置选择对应的调制解调器参数，用本板出厂校准值计算八组频段参数。普通裸机 SRAM 镜像在 LE 1M、27 字节上限下用三个新测试地址分别做了首次服务发现和一次重连。PacketLogger 在三次首次连接中均记录到 Mac 收到第一页服务列表（`0x11`），从句柄 `0x0007` 续查并收到第二页。六次连接均完成 8 字节带响应写入和逐字节一致的 Notify 回显。
 
@@ -379,6 +379,79 @@ openocd -f "$fr_tools/fr8029d_openocd.cfg" \
 | SRAM 试验版栈预留 | 16,128 B | 16,384 B |
 
 这些数字来自 ELF。SRAM 试验版将镜像和栈放在同一 SRAM 区域。当时 FreeRTOS 试验版的 BLE 任务预留 14 KiB，主栈和 Idle 栈各预留 1 KiB。裸机轮询对照的 SRAM 试验版主栈预留 20.75 KiB。实机栈水位和连接窗口余量待复测。构建轮询对照时，去掉 `ble-gatt-event-driven` 特性并重新打包 ELF。
+
+## M2 驱动拆分前基线
+
+2026-11-27 在源码 `435312a` 上使用 Rust 1.96.0、Apple Clang 21.0.0 和 FreeRTOS-Kernel V11.2.0（`0adc196d4bd52a2d91102b525b0aafc1e14a2386`）。固定 BLE 标准短包、1M/2M 协商、事件驱动、自定义 20 字节回显，关闭可选长包、OTA 和紧凑 XIP。每次拆驱动后用相同配置重建四个 ELF，Flash 预算从 XIP ELF 取，栈水位用独立 SRAM 镜像在板上测。
+
+| 镜像 | Cargo features（每行另加 `ble-gatt-event-driven`） | 本轮 ELF SHA-256 前 12 位 |
+|---|---|---|
+| 裸机 XIP | `ble-gatt-xip` | `6b55ab854ca0` |
+| FreeRTOS XIP | `ble-gatt-xip,ble-gatt-freertos` | `5073d1da23e4` |
+| 裸机 SRAM | `ble-gatt-board,ble-gatt-mac-probe` | `31fe169c165f` |
+| FreeRTOS SRAM | `ble-gatt-board,ble-gatt-mac-probe,ble-gatt-freertos` | `a0f1f45aaecc` |
+
+从本目录对每行使用独立输出目录，设置 `FEATURES` 为表中功能列表，`OUT` 为该行的目录，再执行下述命令。顺序为构建、对两份 XIP ELF 执行 [compare](tools/gatt_notify_memory.py)、对两份 SRAM ELF 分别执行 pack 和 [J-Link 双会话验收](#事件驱动-sram-候选版)。两次试验均使用同一台 Mac 的 [BLE 客户端](../../scripts/ble_connect.swift)。保留 ELF、compare 输出、两端日志和试验前的 Flash 前缀，以便追溯。
+
+```sh
+cargo build --locked --offline --release --target thumbv8m.main-none-eabi \
+  --bin fr8029d-ble-adv --features "ble-gatt-event-driven,$FEATURES" --target-dir "$OUT"
+```
+
+| XIP 链接指标（B） | 裸机 | FreeRTOS | FreeRTOS 增减 |
+|---|---:|---:|---:|
+| Flash 应用载荷 | 69,304 | 72,576 | +3,272 |
+| 静态 RAM（data、bss 及对齐） | 600 | 944 | +344 |
+| 栈总预留 | 22,272 | 19,200 | −3,072 |
+| 应用 SRAM 总预留（含 256 B 诊断区） | 23,128 | 20,400 | −2,728 |
+
+裸机 XIP 栈全部用于主栈；FreeRTOS XIP 分别给中断主栈、BLE 任务栈和 Idle 栈预留 1,792、16,384 和 1,024 B。以上 Flash 载荷取自应用段，不计启动区。SRAM 探针自身的静态 RAM 为裸机 184 B、FreeRTOS 528 B。
+
+| SRAM 探针栈（B） | 预留 | 本轮触及 | 剩余 |
+|---|---:|---:|---:|
+| 裸机主栈 | 16,128 | 12,908 | 3,220 |
+| FreeRTOS 中断主栈 | 512 | 144 | 368 |
+| FreeRTOS BLE 任务栈 | 13,312 | 12,916 | **396** |
+| FreeRTOS Idle 栈 | 1,024 | 80 | 944 |
+
+**修前记录（`435312a`）**：BLE 功能两版通过，FreeRTOS SRAM 栈余量未达标。 每版先连接并订阅，带响应写入 `FR29NT75-0123456789A`，断开后重扫、重连、重新订阅并写入 `FR29RC02-abcdefghijZ`。Mac 四次均收到写确认和逐字节相同的 Notify；J-Link 在两版各记录两个不同会话的确认，四次均为双向 2M。每轮结束都恢复 Flash 驻留固件并核对前 12 KiB。
+
+FreeRTOS 探针在两轮通信成功后以栈检查失败退出，BLE 栈剩余量较原有 512 B 门槛少 116 B。后续拆分继续使用 512 B 门槛。表中水位仅覆盖本轮 SRAM 探针的两次连接；XIP 镜像的运行栈、采集并发和最坏路径须分别实测。
+
+### M2 短包 FreeRTOS SRAM 栈修复与复测
+
+相同的编译配置和客户端下，标准事件驱动 SRAM 镜像将 512 B 分给 BLE 任务。向量表从 `0x20006e00` 移到 `0x20007000`，仍按 512 B 对齐；中断主栈、诊断区随镜像后移，大小保持原值。链接器检查任务栈总量及镜像上界。验收继续要求 BLE 栈至少剩余 512 B。
+
+| FreeRTOS 指标（B） | 修前 | 修后 |
+|---|---:|---:|
+| XIP Flash 应用载荷 / 静态 RAM | 72,576 / 944 | 72,576 / 944 |
+| XIP 栈总预留 / 应用 SRAM 总预留 | 19,200 / 20,400 | 19,200 / 20,400 |
+| SRAM 探针载荷 / 静态 RAM | 68,440 / 528 | 68,440 / 528 |
+| SRAM 探针栈总预留 / 应用 SRAM 总预留（不含镜像） | 14,848 / 15,632 | 15,360 / 16,144 |
+| SRAM BLE 栈预留 / 实测触及 / 剩余 | 13,312 / 12,916 / 396 | **13,824 / 12,916 / 908** |
+| SRAM 中断主栈预留 / 触及，Idle 栈预留 / 触及 | 512 / 144，1,024 / 80 | 512 / 144，1,024 / 80 |
+
+修后 SRAM ELF 的 SHA-256 为 `e3be42fb184488d0172537006378badc8fd894f53b967c5ca5a00296ce7b0926`。同一台 Mac 对该镜像独立装载、复测两遍。每遍首次连接写入`FR29NT75-0123456789A`（20 字节），主动断开后重扫、重连、重新订阅，再写入 `FR29RC02-abcdefghijZ`（20 字节）。四次 Write Request 均获确认，四次 Notify 逐字节匹配，板端四次发送确认均为双向 2M。两遍的 BLE 栈水位相同，超过剩余量门槛 396 B。每遍结束已复位回 Flash 驻留固件并回读核对前 12 KiB。裸机两份标准镜像重建的资源数字与修前一致。
+
+### M2 长包 FreeRTOS SRAM 基线
+
+在上述 FreeRTOS SRAM 配置上增加 `ble-gatt-dle`。修前链接映射显示，可执行区从 `0x20005e00` 到 `0x20018000`（末地址不含），容量为 74,240 B，而载荷需要 74,244 B。仅在实验中挪动边界让镜像暂时链接后，实机启动 BLE 任务即触发 Cortex-M33 栈下限异常。最终修复保留原分区、四个 Host 长包缓冲及 BLE 任务栈预留：先构造 HCI 控制器，再由 Host future 借用其队列，避免在嵌套轮询中构造长包状态。CI 的事件驱动 SRAM 构建和打包矩阵已纳入 FreeRTOS 长包配置。
+
+| FreeRTOS 事件驱动长包指标（B） | 修前 | 修后 |
+|---|---:|---:|
+| SRAM 应用载荷（含 Mac 探针） | 74,244（映射需求，超 4） | 73,660（余 580） |
+| SRAM 静态 RAM，含对齐 | 1,480 | 1,480 |
+| SRAM 主栈 / BLE 栈 / Idle 栈预留 | 512 / 13,312 / 1,024 | 512 / 13,312 / 1,024 |
+| SRAM 应用 RAM 预留（含栈和 256 B 诊断区，另计可执行载荷） | 16,584（映射） | 16,584 |
+| XIP Flash 应用载荷 / 静态 RAM | 78,508 / 1,896 | 77,932 / 1,896 |
+| SRAM 实测 BLE 栈水位 / 剩余，常规 20 B 回显 | 无可运行镜像 | 11,944 / 1,368 |
+| SRAM 实测 BLE 栈水位 / 剩余，244 B 验收回显 | 无可运行镜像 | **12,608 / 704** |
+
+**Mac 与 J-Link 实测（2026-11-27）。** 常规长包镜像（ELF SHA-256 前缀 `7a43b6b1aa9d`）完成首次连接和重连，两轮 20 B 写入与 Notify 均逐字节匹配。另在临时验收副本上将自定义回显容量和 `echo_fragment` 诊断识别上限扩为 244 B，FFF3 写入上限维持 20 B。该验收镜像载荷 73,756 B、静态 RAM 1,480 B，ELF SHA-256 前缀为 `153ba1d439bd`。关闭 Mac 专用广播标记的常规长包 SRAM 版也已链接通过（73,668 B）。
+
+同一台 Mac 独立装载满长包验收镜像两遍。每遍在首次连接和主动断开重连后分别订阅、带响应写入、接收 Notify。第 i 个字节按 `(17 × i + 轮次) mod 256` 生成（i 从 0 开始，轮次为 1 或 2）。四次均收到写确认并回显完整 244 B。每个会话在对应 Notify 确认时，J-Link 读取 `FR29_DLE_OBSERVATIONS`，双向协商均为 251 B / 2,120 µs，最大 RX、最大已提交 TX 和最大已确认 TX 均为 251 B（244 B 值 + 3 B ATT + 4 B L2CAP），收发均为 LE 2M。
+
+两遍满长包复测的主栈、BLE 栈、Idle 栈水位均为 144、12,608、80 B。BLE 栈剩余 704 B，高于原门槛 192 B。每遍均用 SRAM 临时镜像，结束时已复位回驻留固件并回读核对 Flash 前 12 KiB。上述运行水位仅适用于所列 SRAM 测试负载。
 
 ## FreeRTOS 单应用任务
 

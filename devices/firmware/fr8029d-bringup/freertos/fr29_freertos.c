@@ -3,8 +3,10 @@
 
 #if defined(FR29_OTA_XIP)
 #define FR29_BLE_STACK_BYTES 19456U
-#elif defined(FR29_EVENT_SRAM)
+#elif defined(FR29_DLE_SRAM)
 #define FR29_BLE_STACK_BYTES 13312U
+#elif defined(FR29_EVENT_SRAM)
+#define FR29_BLE_STACK_BYTES 13824U
 #else
 #define FR29_BLE_STACK_BYTES 16384U
 #endif

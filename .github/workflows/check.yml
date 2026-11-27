@@ -59,7 +59,7 @@ jobs:
           PYTHON
             cargo build --locked --release --target "$target" --bin fr8029d-ble-adv --features "ble-gatt-ota$extra"
           done
-      - name: Validate standard event-driven SRAM images and interrupt vectors
+      - name: Validate event-driven SRAM images and interrupt vectors
         working-directory: devices/firmware/fr8029d-bringup
         run: |
           while read -r runtime identity; do
@@ -73,6 +73,7 @@ jobs:
           done <<'IMAGES'
           ble-gatt-board FR29-GAT2
           ble-gatt-freertos FR29-RTOS
+          ble-gatt-freertos,ble-gatt-dle FR29-RTOS
           IMAGES
       - name: Test Flash recovery and SRAM acceptance tools offline
         working-directory: devices/firmware/fr8029d-bringup/tools

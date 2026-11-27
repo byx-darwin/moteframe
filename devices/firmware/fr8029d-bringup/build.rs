@@ -124,6 +124,9 @@ fn build_freertos(manifest_dir: &Path) -> Result<(), Box<dyn Error>> {
             command.arg("-DFR29_EVENT_DRIVEN=1");
             if env::var_os("CARGO_FEATURE_BLE_GATT_XIP").is_none() {
                 command.arg("-DFR29_EVENT_SRAM=1");
+                if cfg!(feature = "ble-gatt-dle") {
+                    command.arg("-DFR29_DLE_SRAM=1");
+                }
             }
         }
         let status = command

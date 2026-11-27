@@ -138,7 +138,7 @@ pub fn run<B: LinkBackend, F: FnMut(GattReport)>(
 /// Runs the same GATT application with owner-driven radio service.
 /// The board advances the radio on IRQ, timer and software wakes, including
 /// while the Host receive lane is blocked.
-#[cfg(feature = "ble-gatt-event-driven")]
+#[cfg(all(feature = "ble-gatt-event-driven", not(feature = "ble-gatt-dle")))]
 pub async fn run_event_driven<B: LinkBackend, F: FnMut(GattReport)>(
     backend: B,
     resources: &mut Resources,
@@ -146,6 +146,25 @@ pub async fn run_event_driven<B: LinkBackend, F: FnMut(GattReport)>(
     report: F,
 ) -> GattRunError<B::Error> {
     run_events(backend, resources, identity, report, None).await
+}
+
+/// Runs the event-driven Host with long-packet queues on the BLE task.
+#[cfg(all(feature = "ble-gatt-event-driven", feature = "ble-gatt-dle"))]
+pub fn run_event_driven<B: LinkBackend, F: FnMut(GattReport)>(
+    backend: B,
+    resources: &mut Resources,
+    identity: GattIdentity,
+    report: F,
+) -> impl Future<Output = GattRunError<B::Error>> {
+    // Construct the controller before pinning the Host future. Initializing its
+    // long-packet queues inside the nested poll frame exceeds the SRAM task stack.
+    let hci = HciController::new_with_external_wake(Controller::new(backend, identity.version));
+    async move {
+        run_hci::<true, _, _, _>(hci.borrowed(), resources, identity, report, None, || {
+            hci.service()
+        })
+        .await
+    }
 }
 
 /// Run the event-driven Host with the layout-v1 OTA write service. A `None`
@@ -163,7 +182,10 @@ pub async fn run_event_driven_ota<B: LinkBackend, F: FnMut(GattReport)>(
 
 type OtaCallback<'a> = Option<&'a mut dyn FnMut(Option<&[u8]>) -> bool>;
 
-#[cfg(feature = "ble-gatt-event-driven")]
+#[cfg(all(
+    feature = "ble-gatt-event-driven",
+    any(not(feature = "ble-gatt-dle"), feature = "ota-v1")
+))]
 async fn run_events<B: LinkBackend, F: FnMut(GattReport)>(
     backend: B,
     resources: &mut Resources,
