@@ -440,4 +440,42 @@ foreach offset {0x2000 0x0} {
     check {$wrens == 0 && $erases eq {} && $protections eq {} && $resets == 0}
     check {[same_words $sectors(8192) $stock_app] && [same_words $sectors(0) $stock_header]}
 }
+# Capture every completed erase and page program on the actual restore path.
+rename stig model_stig
+proc stig {cmd} {
+    model_stig $cmd
+    if {$cmd eq "0x200a0000"} { lappend ::cuts [list $::sectors(8192) $::sectors(0)] }
+}
+rename program_page model_program_page
+proc program_page {offset data} {
+    model_program_page $offset $data
+    lappend ::cuts [list $::sectors(8192) $::sectors(0)]
+}
+set cuts {}
+start_trial $probe_app $first_page
+trial restore
+rename stig {}
+rename model_stig stig
+rename program_page {}
+rename model_program_page program_page
+check {[llength $cuts] == 34}
+foreach cut $cuts {
+    lassign $cut app header
+    start_trial $app $header
+    set sr1 0
+    trial restore
+    check {[same_words $sectors(8192) $stock_app] && [same_words $sectors(0) $stock_header]}
+    check {$sr1 == 0x7c && !$wel && $resets == 1}
+}
+# A partly restored app still requires matching data and backup identity.
+foreach {sector index} {app 10 header 32 header 56} {
+    lassign [lindex $cuts 1] app header
+    set words [set $sector]
+    lset words $index [expr {[lindex $words $index] ^ 1}]
+    set $sector $words
+    start_trial $app $header
+    set sr1 0
+    check {[catch {trial restore}]}
+    check {$wrens == 0 && $erases eq {} && $protections eq {} && $resets == 0}
+}
 file delete [dict get $stock backup_file] [dict get $other_stock backup_file]

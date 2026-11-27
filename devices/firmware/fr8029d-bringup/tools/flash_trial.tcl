@@ -168,10 +168,10 @@ proc restore_needed {app header original candidate} {
     # Install writes the application first and erases the header second.
     # Neither state carries the Flash marker; the caller verifies the SRAM witness.
     if {$header_original && [matches_restore_prefix $app [dict get $candidate 0x2000]]} { return 1 }
-    if {[same_words $header [lrepeat 1024 0xffffffff]] &&
+    # A candidate header prefix (including an erased header) survives until
+    # restore finishes rewriting the app. A retry may see any completed page.
+    if {[matches_restore_prefix $header [dict get $candidate 0x0]] &&
         ($app_candidate || [matches_restore_prefix $app $stock_app])} { return 1 }
-    # A completed candidate app precedes every candidate header page.
-    if {$app_candidate && [matches_restore_prefix $header [dict get $candidate 0x0]]} { return 1 }
     # Header restore starts only after the original app has been verified.
     if {$app_original && [matches_restore_prefix $header $stock_header]} { return 1 }
     error "Starting sectors do not match the package or an interrupted restore"
