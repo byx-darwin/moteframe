@@ -14,11 +14,14 @@ use fr8029d_bringup::advertising::receive_descriptor;
 #[cfg(not(feature = "ble-gatt-dle"))]
 use fr8029d_bringup::advertising::receive_ring;
 use fr8029d_bringup::advertising::{
-    RX_COUNT, RX_OFFSET, RX_WORDS, SCAN_TX_OFFSET, TX_OFFSET, connectable_descriptors,
+    RX_COUNT, RX_OFFSET, SCAN_TX_OFFSET, TX_OFFSET, connectable_descriptors,
 };
 use fr8029d_bringup::connection::{ConnectionRequest, PacketTime};
 
-const RX_READY: u16 = 1 << 15;
+use fr8029d_chip::radio::records::{
+    RX_COARSE, RX_FINE_AND_LINK, RX_HEADER, RX_PAYLOAD, RX_READY, RX_STATUS,
+    rx_descriptor_address as descriptor, rx_fine_countdown, rx_link_id,
+};
 const INVALID_ADV_STATUS: u16 = 0x003d;
 const CONNECT_REQUEST_BYTES: usize = 34;
 const SCAN_REQUESTS: usize = 16;
@@ -91,19 +94,19 @@ impl Receiver {
             return Ok(None);
         }
         fence(Ordering::Acquire);
-        let offset = halfword(address + 0x14);
+        let offset = halfword(address + RX_PAYLOAD);
         if offset != receive_descriptor(u16::from(index.to_le_bytes()[0]))[10] {
             return Err(17);
         }
-        let fine = halfword(address + 0x0c);
+        let fine = halfword(address + RX_FINE_AND_LINK);
         Ok(Some(HeldRx {
-            header: halfword(address + 4),
-            status: halfword(address + 2),
+            header: halfword(address + RX_HEADER),
+            status: halfword(address + RX_STATUS),
             time: PacketTime {
-                coarse: packet_word(address + 8) & super::CLOCK_MASK,
-                fine_countdown: fine & 0x03ff,
+                coarse: packet_word(address + RX_COARSE) & super::CLOCK_MASK,
+                fine_countdown: rx_fine_countdown(fine),
             },
-            link_id: fine >> 11,
+            link_id: rx_link_id(fine),
             payload: RxBuffer {
                 index: index.to_le_bytes()[0],
                 offset,
@@ -197,21 +200,21 @@ impl Receiver {
             return Ok(None);
         }
         fence(Ordering::Acquire);
-        let status = halfword(address + 2);
-        let header = halfword(address + 4);
-        let buffer = halfword(address + 0x14);
+        let status = halfword(address + RX_STATUS);
+        let header = halfword(address + RX_HEADER);
+        let buffer = halfword(address + RX_PAYLOAD);
         if buffer != self.buffers[self.next] {
             return Err(17);
         }
-        let fine = halfword(address + 0x0c);
+        let fine = halfword(address + RX_FINE_AND_LINK);
         let mut packet = Packet {
             header,
             status,
             time: PacketTime {
-                coarse: packet_word(address + 8) & super::CLOCK_MASK,
-                fine_countdown: fine & 0x03ff,
+                coarse: packet_word(address + RX_COARSE) & super::CLOCK_MASK,
+                fine_countdown: rx_fine_countdown(fine),
             },
-            link_id: fine >> 11,
+            link_id: rx_link_id(fine),
             payload: [0; CONNECT_REQUEST_BYTES],
         };
         let length = usize::from(header >> 8);
@@ -286,8 +289,4 @@ impl Receiver {
         }
         Some(request)
     }
-}
-
-fn descriptor(index: usize) -> usize {
-    PACKET_RAM + usize::from(RX_OFFSET) + index * RX_WORDS * size_of::<u16>()
 }

@@ -14,6 +14,7 @@ const IRQ_ACK: usize = BASEBAND + 0x20;
 const EVENT_STATUS: usize = BASEBAND + 0x24;
 const RX_QUEUE: usize = BASEBAND + 0x28;
 const CLOCK: usize = BASEBAND + 0x100;
+const CLOCK_FINE: usize = BASEBAND + 0x104;
 const SUBMIT: usize = BASEBAND + 0x110;
 const CLOCK_LATCH: u32 = 1 << 31;
 
@@ -87,6 +88,29 @@ pub unsafe fn clock() -> Option<u32> {
         }
     }
     None
+}
+
+/// Read the latched coarse clock and its fine countdown.
+///
+/// # Safety
+///
+/// Only the baseband owner may latch and read the FR8029D clock.
+#[inline]
+pub unsafe fn clock_snapshot() -> Option<(u32, u16)> {
+    // SAFETY: The caller owns the same scheduler clock registers.
+    let coarse = unsafe { clock() }?;
+    let fine = (read32(CLOCK_FINE) as u16) & 0x03ff;
+    Some((coarse, fine))
+}
+
+/// Observe the completion flag without acknowledging it.
+///
+/// # Safety
+///
+/// Call only with access to an initialized FR8029D baseband.
+#[inline]
+pub unsafe fn event_end_pending() -> bool {
+    read32(IRQ_STATUS) & IRQ_EVENT_END != 0
 }
 
 /// Get the last scheduler slot selected by the submit register.

@@ -20,6 +20,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     if env::var("TARGET")? != "thumbv8m.main-none-eabi" {
         return Err("the probe requires --target thumbv8m.main-none-eabi".into());
     }
+    validate_touch_profile()?;
 
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR")?);
     #[cfg(feature = "ble-gatt-ota")]
@@ -58,6 +59,35 @@ fn main() -> Result<(), Box<dyn Error>> {
             println!("cargo:rustc-link-arg-bin=fr8029d-ble-adv=--defsym=__gatt_freertos=1");
         }
         link_probe("fr8029d-ble-adv", &script, advertising_in_sram);
+    }
+    Ok(())
+}
+
+fn validate_touch_profile() -> Result<(), &'static str> {
+    if !cfg!(feature = "touchkey-feedback") {
+        return Ok(());
+    }
+    if !cfg!(feature = "ble-gatt-board") {
+        return Err("touchkey-feedback requires the ble-gatt-board firmware entry");
+    }
+    if cfg!(feature = "ble-gatt-ota") {
+        return Err("touchkey-feedback and ble-gatt-ota require separate firmware images");
+    }
+    if cfg!(feature = "mic1-acquisition")
+        && !cfg!(all(
+            feature = "ble-gatt-freertos",
+            feature = "ble-gatt-xip",
+            not(feature = "ble-gatt-dle")
+        ))
+    {
+        return Err("touchkey-feedback with MIC1 requires FreeRTOS Flash with short BLE packets");
+    }
+    if cfg!(all(
+        feature = "ble-gatt-freertos",
+        feature = "ble-gatt-dle",
+        not(feature = "ble-gatt-xip")
+    )) {
+        return Err("touchkey-feedback with FreeRTOS long packets requires a Flash image");
     }
     Ok(())
 }

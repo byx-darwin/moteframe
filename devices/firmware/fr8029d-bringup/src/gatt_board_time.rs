@@ -81,7 +81,11 @@ mod arm {
     use fr8029d_bringup::gatt_runner::run as run_gatt;
     #[cfg(all(
         feature = "ble-gatt-event-driven",
-        not(any(feature = "ble-gatt-ota", feature = "mic1-acquisition"))
+        not(any(
+            feature = "ble-gatt-ota",
+            feature = "mic1-acquisition",
+            feature = "touchkey-feedback"
+        ))
     ))]
     use fr8029d_bringup::gatt_runner::run_event_driven as run_gatt;
     use fr8029d_bringup::gatt_runner::{GattIdentity, GattReport, GattRunError, Resources};
@@ -175,6 +179,35 @@ mod arm {
             waker.wake_by_ref();
             let _ = (at, waker);
         }
+    }
+
+    #[cfg(feature = "touchkey-feedback")]
+    use fr8029d_bringup::touch_feedback::TouchFeedback;
+    #[cfg(feature = "touchkey-feedback")]
+    use fr8029d_evb::{LED_ACTIVE_HIGH, LED_PIN, TOUCH_KEYS, gpio, touchkey};
+
+    // Words 8..=12 are unused by the GATT probe's radio diagnostics.
+    #[cfg(feature = "touchkey-feedback")]
+    #[inline(never)]
+    fn service_touch(state: &mut TouchFeedback, now_us: u32) {
+        // SAFETY: The foreground initialized and owns the TouchKey/GPIO pins.
+        let scan = unsafe { touchkey::sample() };
+        let raw = match scan {
+            touchkey::Scan::Complete(raw) => {
+                super::super::increment(9);
+                diagnostic(10, u32::from(raw[0]) | (u32::from(raw[1]) << 16));
+                Some(raw)
+            }
+            touchkey::Scan::Pending => None,
+            touchkey::Scan::Fault => Some([0; 2]),
+        };
+        let pressed = state.update(raw, now_us);
+        if matches!(scan, touchkey::Scan::Complete(_)) {
+            diagnostic(11, state.packed_baseline());
+        }
+        // SAFETY: LED_PIN is the dedicated output initialized by this owner.
+        unsafe { gpio::set_output(LED_PIN, (pressed != 0) == LED_ACTIVE_HIGH) };
+        diagnostic(12, u32::from(pressed));
     }
 
     const PHASE: usize = 40;
@@ -294,6 +327,28 @@ mod arm {
             let mut report = Report::default();
             #[cfg(feature = "ble-gatt-event-driven")]
             wake::init();
+            #[cfg(feature = "touchkey-feedback")]
+            let mut touch = TouchFeedback::default();
+            #[cfg(feature = "touchkey-feedback")]
+            // SAFETY: The EVB assigns PC2/PC3 and PA5 to this foreground.
+            let touch_ready = unsafe {
+                gpio::configure_output(LED_PIN, !LED_ACTIVE_HIGH);
+                touchkey::initialize(TOUCH_KEYS)
+            };
+            #[cfg(feature = "touchkey-feedback")]
+            {
+                for index in 9..=12 {
+                    diagnostic(index, 0);
+                }
+                diagnostic(
+                    8,
+                    if touch_ready {
+                        0x544f_5543
+                    } else {
+                        0x544b_4552
+                    },
+                );
+            }
             #[cfg(feature = "ble-gatt-ota")]
             // SAFETY: This maintenance image exclusively owns QSPI; acquisition is disabled.
             let Ok(mut ota) = (unsafe { crate::qspi_slots::ota_receiver() }) else {
@@ -319,10 +374,28 @@ mod arm {
                 |event| report.record(event),
                 &mut receive
             ));
-            #[cfg(not(any(feature = "ble-gatt-ota", feature = "mic1-acquisition")))]
+            #[cfg(not(any(
+                feature = "ble-gatt-ota",
+                feature = "mic1-acquisition",
+                feature = "touchkey-feedback"
+            )))]
             let mut app = pin!(run_gatt(backend, &mut resources, identity, |event| {
                 report.record(event);
             }));
+            #[cfg(all(
+                feature = "touchkey-feedback",
+                not(any(feature = "ble-gatt-ota", feature = "mic1-acquisition"))
+            ))]
+            let mut app = pin!(
+                fr8029d_bringup::gatt_runner::run_event_driven_with_application(
+                    backend,
+                    &mut resources,
+                    identity,
+                    |event| report.record(event),
+                    None,
+                    (),
+                )
+            );
             #[cfg(feature = "mic1-acquisition")]
             // SAFETY: This runner owns SARADC on the FR8029D EVB. In the
             // layout-v1 image, reset has copied the SRAM commands, both
@@ -368,6 +441,13 @@ mod arm {
                     diagnostic(CLOCK_FAULT, fault as u32);
                     break;
                 }
+                #[cfg(feature = "touchkey-feedback")]
+                if touch_ready {
+                    // The TouchKey lease uses wrapping subtraction in a 32-bit clock.
+                    #[allow(clippy::cast_possible_truncation)]
+                    let touch_now_us = now_us as u32;
+                    service_touch(&mut touch, touch_now_us);
+                }
                 #[cfg(feature = "ble-gatt-event-driven")]
                 if let Some(now) = snapshot {
                     let radio = wake::radio_deadline();
@@ -375,11 +455,23 @@ mod arm {
                     let delay = next_delay_us(now, now_us, radio, host);
                     #[cfg(feature = "mic1-acquisition")]
                     let delay = fr8029d_bringup::mic_session::acquisition_wake_delay(delay);
+                    #[cfg(feature = "touchkey-feedback")]
+                    let delay = if touch_ready {
+                        let period = touchkey::SCAN_INTERVAL_US;
+                        Some(delay.unwrap_or(period).min(period))
+                    } else {
+                        delay
+                    };
                     wake::wait(
                         delay,
                         matches!(radio, Some(RadioDeadline::Completion { .. })),
                     );
                 }
+            }
+            #[cfg(feature = "touchkey-feedback")]
+            // SAFETY: This foreground owns the LED output until it stops.
+            unsafe {
+                gpio::set_output(LED_PIN, !LED_ACTIVE_HIGH);
             }
         } else {
             diagnostic(APP_FAULT, 1);

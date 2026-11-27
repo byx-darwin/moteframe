@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "boards/fr8029d-evb",
+    "chips/freqchip/fr802x/common",
     "chips/freqchip/fr802x/fr8029d",
     "crates/ble-controller",
     "crates/ble-host-trouble",

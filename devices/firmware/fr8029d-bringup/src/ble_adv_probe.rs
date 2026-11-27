@@ -59,10 +59,8 @@ fn write8(address: usize, value: u8) {
 const BASEBAND_ID: usize = 0x4000_0004;
 #[cfg(not(feature = "ble-gatt-board"))]
 const IRQ_MASK: usize = 0x4000_0018;
-#[cfg(any(not(feature = "ble-gatt-board"), feature = "ble-gatt-event-driven"))]
+#[cfg(not(feature = "ble-gatt-board"))]
 use fr8029d_chip::radio::IRQ_EVENT_END;
-#[cfg(all(feature = "ble-gatt-board", feature = "ble-gatt-event-driven"))]
-use fr8029d_chip::radio::IRQ_STATUS;
 #[cfg(not(feature = "ble-adv-cold"))]
 const EVENT_LIMIT: u32 = 460;
 #[cfg(not(feature = "ble-adv-cold"))]
@@ -87,7 +85,10 @@ unsafe extern "C" {
     fn fr29_freertos_start(entry: extern "C" fn(*mut core::ffi::c_void));
 }
 
-#[cfg(any(not(feature = "ble-gatt-board"), feature = "ble-gatt-event-driven"))]
+#[cfg(any(
+    not(feature = "ble-gatt-board"),
+    all(feature = "ble-gatt-event-driven", not(feature = "ble-gatt-freertos"))
+))]
 fn read32(address: usize) -> u32 {
     // SAFETY: Call sites use word-aligned registers mapped on the pinned board.
     unsafe { read_volatile(address as *const u32) }

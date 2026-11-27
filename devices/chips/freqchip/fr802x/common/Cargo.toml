@@ -1,0 +1,9 @@
+[package]
+name = "fr802x-common"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+critical-section = { workspace = true }

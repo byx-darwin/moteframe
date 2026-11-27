@@ -41,7 +41,6 @@ mod hardware {
     const ADC: usize = 0x500e_0000;
     const ASP: usize = 0x500f_0000;
     const SYS: usize = 0xe005_3000;
-    const FRSPIM: usize = 0xe008_0000;
     const CONTROL: usize = ADC;
     const CONFIG: usize = ADC + 0x04;
     const FIFO_COUNT: usize = ADC + 0x54;
@@ -70,17 +69,9 @@ mod hardware {
     }
 
     fn pmu(address: u8, value: Option<u32>) -> Option<u32> {
-        // The PMU serial port is also used by board power management.
-        critical_section::with(|_| {
-            let mut command = (u32::from(address) << 16) | 0x11; // GO, one byte, PMU
-            if let Some(data) = value {
-                write(FRSPIM + 4, data);
-                command |= 1 << 8;
-            }
-            write(FRSPIM, command);
-            (0..512).find(|_| read(FRSPIM) & 3 == 2)?;
-            Some(read(FRSPIM + 8) & 0xff)
-        })
+        // SAFETY: SARADC initialization enables the serial clock before use.
+        // The shared transaction serializes the APB port against interrupts.
+        unsafe { fr802x_common::pmu::exchange(address, value) }
     }
 
     fn restore_pmu(saved: u32) {

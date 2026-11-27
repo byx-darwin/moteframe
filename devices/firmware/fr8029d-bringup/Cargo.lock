@@ -245,6 +245,7 @@ name = "fr8029d-chip"
 version = "0.1.0"
 dependencies = [
  "critical-section",
+ "fr802x-common",
 ]
 
 [[package]]
@@ -252,6 +253,13 @@ name = "fr8029d-evb"
 version = "0.1.0"
 dependencies = [
  "fr8029d-chip",
+]
+
+[[package]]
+name = "fr802x-common"
+version = "0.1.0"
+dependencies = [
+ "critical-section",
 ]
 
 [[package]]

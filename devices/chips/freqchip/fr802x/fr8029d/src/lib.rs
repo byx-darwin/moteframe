@@ -6,3 +6,7 @@
 pub mod qspi;
 pub mod radio;
 pub mod saradc;
+
+#[cfg(target_arch = "arm")]
+pub use fr802x_common::gpio;
+pub use fr802x_common::{timer0, touchkey};

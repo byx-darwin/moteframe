@@ -14,11 +14,11 @@ use fr8029d_bringup::{
     connection::{ConnectionEvent, ConnectionRequest},
 };
 
-pub(super) const CONNECTION_CONTROL: u16 = 0x01e4;
+pub(super) use fr8029d_chip::radio::records::CONNECTION_CONTROL;
+use fr8029d_chip::radio::records::{LINK_EVENT_COUNTER, LINK_RX_WINDOW, returned_tx_descriptor};
 pub(super) const LINK_ID: u8 = 1;
 #[cfg(not(feature = "ble-gatt-board"))]
 const MAX_PROBE_EVENTS: u16 = 20;
-pub(super) const TX_DONE: u16 = 1 << 15;
 pub(super) const CONNECTED_RX_ERRORS: u16 = 0x007f;
 pub(super) const EVENT_COMPLETION_TIMEOUT: u32 = 18;
 
@@ -27,11 +27,11 @@ pub(super) fn prepare_link(request: ConnectionRequest, event: ConnectionEvent) {
     // baseband to exchange empty PDUs until the Host queues a packet.
     write_record(
         PACKET_RAM + usize::from(TX_OFFSET),
-        &[TX_DONE | (SCAN_TX_OFFSET / 4), 0, 0, 0, 0, 0, 0, 0],
+        &returned_tx_descriptor(SCAN_TX_OFFSET),
     );
     write_record(
         PACKET_RAM + usize::from(SCAN_TX_OFFSET),
-        &[TX_DONE | (TX_OFFSET / 4), 0, 0, 0, 0, 0, 0, 0],
+        &returned_tx_descriptor(TX_OFFSET),
     );
     let control = PACKET_RAM + usize::from(CONNECTION_CONTROL);
     write_record(control, &request.control_words(LINK_ID, TX_OFFSET, event));
@@ -40,8 +40,8 @@ pub(super) fn prepare_link(request: ConnectionRequest, event: ConnectionEvent) {
 pub(super) fn submit_link(slot: u32, event: ConnectionEvent, counter: u16) -> u16 {
     let control = PACKET_RAM + usize::from(CONNECTION_CONTROL);
     // The previous event has completed. Preserve the rest of the live link record.
-    write_record(control + 0x1e, &[event.receive_window]);
-    write_record(control + 0x60, &[counter]);
+    write_record(control + LINK_RX_WINDOW, &[event.receive_window]);
+    write_record(control + LINK_EVENT_COUNTER, &[counter]);
     let words = event.slot_words(CONNECTION_CONTROL);
     submit(slot, &words);
     words[5]

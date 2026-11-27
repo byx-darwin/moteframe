@@ -4,8 +4,8 @@ use super::{
     CLOCK_MASK, PACKET_RAM, SLOT_LEAD_TICKS, clock,
     connect_probe::Receiver,
     connect_radio::{
-        CONNECTED_RX_ERRORS, CONNECTION_CONTROL, EVENT_COMPLETION_TIMEOUT, LINK_ID, TX_DONE,
-        prepare_link, read_end, submit, submit_link, wait_connection_event,
+        CONNECTED_RX_ERRORS, CONNECTION_CONTROL, EVENT_COMPLETION_TIMEOUT, LINK_ID, prepare_link,
+        read_end, submit, submit_link, wait_connection_event,
     },
     diagnostic, increment,
     radio_hardware::{
@@ -27,6 +27,10 @@ use fr8029d_bringup::{
     connection::{ConnectionEvent, ConnectionRequest, ConnectionUpdate, PacketTime},
     phy::LinkPhy,
     wake::SlotWatchdog,
+};
+use fr8029d_chip::radio::records::{
+    LINK_CHANNEL_MAP, LINK_HOP, LINK_RX_LIMIT, LINK_TX_HEAD, LINK_TX_LIMIT, TX_DONE, TX_HEADER,
+    TX_LINK_MASK, TX_PAYLOAD,
 };
 #[cfg(feature = "ble-gatt-event-driven")]
 use {super::gatt_board_wake, fr8029d_bringup::wake::RadioDeadline};
@@ -76,7 +80,7 @@ use ble_controller::LinkEvent as BoardEvent;
 pub(super) const ADAPTIVE_PHY: bool = !cfg!(feature = "ble-gatt-1m-only");
 const HALF_CLOCK: u32 = CLOCK_MASK.div_ceil(2);
 const CONTROL: usize = PACKET_RAM + CONNECTION_CONTROL as usize;
-const TX_HEAD_REGISTER: usize = CONTROL + 0x24;
+const TX_HEAD_REGISTER: usize = CONTROL + LINK_TX_HEAD;
 const LEGACY_ADV_LEN: usize = 14;
 const NOTIFY_ACK_SESSION: usize = 33;
 const NOTIFY_ACK_LOW: usize = 34;
@@ -326,7 +330,7 @@ mod tests {
         let link = radio.link.as_mut().ok_or(21_u32)?;
         link.anchor = Some(link.request_time);
         link.counter = u16::MAX;
-        let hop_state = CONTROL + 0x18;
+        let hop_state = CONTROL + LINK_HOP;
         set_halfword(hop_state, 0x8800 | 32);
         for (counter, channel) in [(0, 3), (1, 11)] {
             let start = radio.link.as_ref().ok_or(21_u32)?.event.start.coarse;
@@ -699,9 +703,9 @@ impl Link {
         self.apply_map_at_instant();
         // No slot will execute this event's CSA1 hop. Move the previous
         // unmapped channel forward once, preserving the other link fields.
-        let hop_state = halfword(CONTROL + 0x18);
+        let hop_state = halfword(CONTROL + LINK_HOP);
         let next = ((hop_state & 0x3f) + u16::from(self.request.hop)) % 37;
-        set_halfword(CONTROL + 0x18, (hop_state & !0x3f) | next);
+        set_halfword(CONTROL + LINK_HOP, (hop_state & !0x3f) | next);
         self.advance(None);
     }
 
@@ -772,13 +776,13 @@ impl Link {
         {
             for (index, bytes) in map[..4].chunks_exact(2).enumerate() {
                 set_halfword(
-                    CONTROL + 0x32 + index * 2,
+                    CONTROL + LINK_CHANNEL_MAP + index * 2,
                     u16::from_le_bytes([bytes[0], bytes[1]]),
                 );
             }
             set_halfword(
-                CONTROL + 0x36,
-                (halfword(CONTROL + 0x36) & !0x1f) | u16::from(map[4]),
+                CONTROL + LINK_CHANNEL_MAP + 4,
+                (halfword(CONTROL + LINK_CHANNEL_MAP + 4) & !0x1f) | u16::from(map[4]),
             );
             self.request.channel_map = map;
             self.map_update = None;
@@ -990,7 +994,7 @@ impl Radio {
         if payload.len() > usize::from(link.tx_airtime().octets()) {
             return Err(20);
         }
-        let offset = (halfword(TX_HEAD_REGISTER) & 0x3fff) * 4;
+        let offset = (halfword(TX_HEAD_REGISTER) & TX_LINK_MASK) * 4;
         if !matches!(offset, TX_OFFSET | SCAN_TX_OFFSET) {
             return Err(21);
         }
@@ -1002,8 +1006,8 @@ impl Radio {
         for (index, &byte) in payload.iter().enumerate() {
             write8(PACKET_RAM + usize::from(TX_PAYLOAD_OFFSET) + index, byte);
         }
-        set_halfword(descriptor + 2, u16::from_le_bytes(header));
-        set_halfword(descriptor + 4, TX_PAYLOAD_OFFSET);
+        set_halfword(descriptor + TX_HEADER, u16::from_le_bytes(header));
+        set_halfword(descriptor + TX_PAYLOAD, TX_PAYLOAD_OFFSET);
         fence(Ordering::Release);
         set_halfword(descriptor, next & !TX_DONE);
         #[cfg(feature = "ble-gatt-dle")]
@@ -1183,8 +1187,8 @@ impl Radio {
                 link.apply_map_at_instant();
                 if link.parameters_changed {
                     let limit = 2 * link.request.interval - 3;
-                    set_halfword(CONTROL + 0x2e, limit);
-                    set_halfword(CONTROL + 0x30, limit);
+                    set_halfword(CONTROL + LINK_RX_LIMIT, limit);
+                    set_halfword(CONTROL + LINK_TX_LIMIT, limit);
                 }
                 let event = link.event;
                 #[cfg(feature = "ble-gatt-dle")]

@@ -42,4 +42,4 @@ flowchart TD
 
 MIC1 由 FR8029D 的 SARADC 驱动、EVB 板级配置和固件采集会话组成。固件组装 GATT 回调，裸机和 FreeRTOS 共用这套采集会话。QSPI0 的物理擦写、控制器校验和保护恢复归芯片层。配置 A/B、FlashEnv 和 OTA 范围由固件决定。
 
-FR8029D 射频驱动负责读取出厂校准、初始化调制解调器和基带、访问交换 RAM、提交时隙及确认事件。固件的 `LinkBackend` 适配决定何时发广播、打开接收窗口、应用 PHY 协商结果和恢复链路。各阶段进度及板测条件见[实施顺序与验收](../../devices/boards/fr8029d-evb/README.md#实施顺序与验收)。
+FR802x 系列层提供 TIMER0 单次定时和 PMU 串行访问，型号层选择实际使用的系列驱动。FR8029D 型号层负责出厂校准、基带时钟、交换 RAM 描述符和时隙操作。固件设置中断优先级，决定广播与连接事件的时机，并选择裸机睡眠或 FreeRTOS 任务通知。[富芮坤系列与型号代码](../../devices/chips/freqchip/README.md#系列驱动与板测范围) · [实施顺序与验收](../../devices/boards/fr8029d-evb/README.md#实施顺序与验收)。

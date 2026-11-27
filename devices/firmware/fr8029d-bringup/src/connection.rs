@@ -189,36 +189,18 @@ impl ConnectionRequest {
     /// of the first TX descriptor in Packet RAM.
     #[must_use]
     pub fn control_words(self, link_id: u8, tx_offset: u16, event: ConnectionEvent) -> [u16; 74] {
-        let [aa0, aa1, aa2, aa3] = self.access_address.to_le_bytes();
-        let [crc0, crc1, crc2, _] = self.crc_init.to_le_bytes();
-        let [ch0, ch1, ch2, ch3, ch4] = self.channel_map;
-        let mut words = [0; 74];
-        words[0] = 0x0003;
-        words[1] = u16::from_le_bytes([0x20, link_id]);
-        // TX/RX PHY both use code 0 for 1M. The peripheral role is in word 0.
-        words[0x06 / 2] = 0x1100;
-        words[0x0e / 2] = u16::from_le_bytes([aa0, aa1]);
-        words[0x10 / 2] = u16::from_le_bytes([aa2, aa3]);
-        words[0x12 / 2] = u16::from_le_bytes([crc0, crc1]);
-        words[0x14 / 2] = u16::from(crc2);
-        words[0x18 / 2] = 0x8000 | (u16::from(self.hop) << 8);
-        words[0x1a / 2] = 7;
-        words[0x1e / 2] = event.receive_window;
-        words[0x24 / 2] = tx_offset / 4;
-        // Event limits use 625 us slots. Allow the four ROM programming
-        // half-slots and two additional half-slots before the next event.
-        let event_limit = self.interval.saturating_mul(2).saturating_sub(3);
-        words[0x2e / 2] = event_limit;
-        words[0x30 / 2] = event_limit;
-        words[0x32 / 2] = u16::from_le_bytes([ch0, ch1]);
-        words[0x34 / 2] = u16::from_le_bytes([ch2, ch3]);
-        words[0x36 / 2] = u16::from(ch4);
-        // The ROM peripheral initializer at 0x2a2bc sets the RAM buffer
-        // capacity to 251 and leaves the following halfword at zero. The
-        // length-update routine at 0x28140 updates software limits and the
-        // event duration separately.
-        words[0x38 / 2] = 0xfb;
-        words
+        // Allow the four ROM programming half-slots and two extra half-slots.
+        fr8029d_chip::radio::records::LinkControl {
+            access_address: self.access_address,
+            crc_init: self.crc_init,
+            channel_map: self.channel_map,
+            hop: self.hop,
+            event_limit: self.interval.saturating_mul(2).saturating_sub(3),
+            receive_window: event.receive_window,
+            link_id,
+            tx_offset,
+        }
+        .encode()
     }
 }
 
@@ -462,22 +444,17 @@ impl ConnectionEvent {
     /// Pass the word-aligned byte offset of the control record in Packet RAM.
     #[must_use]
     pub fn slot_words(self, control_offset: u16) -> [u16; 8] {
-        let [a, b, c, d] = (self.start.coarse & CLOCK_MASK).to_le_bytes();
         let duration = if self.duration_half_us < 0x8000 {
             low_halfword((self.duration_half_us + 1) / 2)
         } else {
             0x8000 | low_halfword((self.duration_half_us + HALF_US_PER_TICK) / HALF_US_PER_TICK)
         };
-        [
-            0x2802,
-            u16::from_le_bytes([a, b]),
-            u16::from_le_bytes([c, d]),
+        fr8029d_chip::radio::records::connection_slot(
+            self.start.coarse,
             self.start.fine_countdown,
-            control_offset / 4,
+            control_offset,
             duration,
-            0,
-            0x0f00,
-        ]
+        )
     }
 }
 

@@ -1,5 +1,6 @@
 //! FR8029D modem, baseband and packet RAM.
 
+pub mod records;
 pub mod trim;
 
 /// Base address of the 16 KiB baseband packet RAM window.
@@ -24,9 +25,10 @@ mod hardware;
 
 #[cfg(all(feature = "radio", target_arch = "arm"))]
 pub use hardware::{
-    arm_slot, clear_completed_event, clock, configure_baseband, initialize, packet_byte,
-    packet_halfword, packet_word, pending_slot, scheduler_fault, set_packet_byte,
-    set_packet_halfword, set_phy, set_rx_queue, submit_slot, take_event_end, write_record,
+    arm_slot, clear_completed_event, clock, clock_snapshot, configure_baseband, event_end_pending,
+    initialize, packet_byte, packet_halfword, packet_word, pending_slot, scheduler_fault,
+    set_packet_byte, set_packet_halfword, set_phy, set_rx_queue, submit_slot, take_event_end,
+    write_record,
 };
 
 #[cfg(test)]

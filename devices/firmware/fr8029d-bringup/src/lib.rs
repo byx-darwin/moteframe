@@ -179,3 +179,6 @@ impl DescriptorRegion {
 
 #[cfg(feature = "qspi-config")]
 pub mod qspi_config;
+
+#[cfg(feature = "touchkey-feedback")]
+pub mod touch_feedback;

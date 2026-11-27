@@ -84,6 +84,33 @@ jobs:
           ble-gatt-freertos FR29-RTOS
           ble-gatt-freertos,ble-gatt-dle FR29-RTOS
           IMAGES
+      - name: Test TouchKey and validate its firmware profiles
+        working-directory: devices/firmware/fr8029d-bringup
+        run: |
+          cargo test --locked --lib --features touchkey-feedback touch_feedback
+          touch_image() {
+            cargo build --locked --release --target thumbv8m.main-none-eabi --bin fr8029d-ble-adv --features "touchkey-feedback,$1"
+          }
+          for features in ble-gatt-board,ble-gatt-mac-probe ble-gatt-freertos,ble-gatt-mac-probe; do
+            touch_image "$features"
+            python3 tools/gatt_notify_memory.py pack target/thumbv8m.main-none-eabi/release/fr8029d-ble-adv "$RUNNER_TEMP/touch-$features.tcl"
+          done
+          for features in ble-gatt-xip-compact ble-gatt-xip-compact,ble-gatt-freertos; do
+            touch_image "$features"
+          done
+          reject_touch_image() {
+            local log="$RUNNER_TEMP/touch-rejected.log"
+            if touch_image "$1" >"$log" 2>&1; then
+              echo "Unexpected success for touchkey-feedback,$1" >&2
+              return 1
+            fi
+            grep -F "$2" "$log" || { cat "$log"; return 1; }
+          }
+          reject_touch_image ble-adv-probe 'requires the ble-gatt-board firmware entry'
+          reject_touch_image ble-gatt-ota 'require separate firmware images'
+          reject_touch_image ble-gatt-board,mic1-acquisition 'requires FreeRTOS Flash with short BLE packets'
+          reject_touch_image mic1-config-layout-v1 'requires FreeRTOS Flash with short BLE packets'
+          reject_touch_image ble-gatt-freertos,ble-gatt-dle 'requires a Flash image'
       - name: Test Flash recovery and SRAM acceptance tools offline
         working-directory: devices/firmware/fr8029d-bringup/tools
         run: |

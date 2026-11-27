@@ -48,6 +48,7 @@ ble-gatt-1m-only = ["ble-gatt-board"]
 ble-gatt-dle = ["ble-gatt-probe", "ble-controller/data-length", "ble-host-trouble/extended-mtu"]
 ble-gatt-freertos = ["ble-gatt-board"]
 ble-gatt-event-driven = ["ble-gatt-probe", "ble-controller/external-wake"]
+touchkey-feedback = ["ble-gatt-event-driven", "dep:fr8029d-evb"]
 mic1-acquisition = ["ble-gatt-event-driven", "dep:critical-section", "dep:fr8029d-evb"]
 mic1-config-layout-v1 = ["mic1-acquisition", "ble-gatt-xip-compact", "qspi-config"]
 

@@ -755,3 +755,63 @@ J-Link 保持开发板供电，经 Boot ROM 复位启动两种 XIP 镜像。同�
 | FreeRTOS，拆分后 | `471770879285` | 1,510 / 1,510 | 1,648 | 6,448 |
 
 各轮序号缺口、软件覆盖和 FIFO 异常观测均为零。每轮结束后恢复 SDK v0.3.6，1,048,576 B 全片与各轮试验前备份逐字节一致，SHA-256 为 `072524958e690a560a70e50ef64ac6d3992aaa8c908ff240d7042cc0d577b5ed`，写保护回读为 SR1=`0x7C`、SR2=`0x02`。本轮复位期间开发板维持供电。真实断电冷启动和擦写中断电仍待独立验证。
+
+#### 系列驱动与型号边界补齐
+
+TIMER0 的时钟选择、单次启动、停机和确认中断，以及 PMU 字节事务，迁入 `fr802x-common`。基带细时钟、完成标志和射频记录编码位于 `fr8029d-chip`。固件的中断优先级、最早期限和连接调度由原运行时处理。[系列驱动](../../chips/freqchip/fr802x/common/src/lib.rs) · [FR8029D 描述符](../../chips/freqchip/fr802x/fr8029d/src/radio/records.rs)
+
+与 `f152816` 的同功能 MIC1 构建相比，裸机和 FreeRTOS 的 Flash 载荷均增加 8 B，分别为 71,176 B 和 74,376 B。对应静态 RAM 仍为 704 B 和 1,056 B，栈预留仍为 22,272 B 和 19,200 B。
+
+使用同一台 Mac 复测四组 SRAM 镜像。两个运行方式在固定 1M 和协商到双向 2M 时均完成两轮连接、20 B 写入及原样 Notify。J-Link 记录到 TIMER0 和基带中断、两轮链路确认。裸机主栈和 FreeRTOS BLE 任务栈最低余量分别为 6,220 B 和 3,908 B。每轮都复位回 SDK，Flash 前 12 KiB 与备份一致，Flash 镜像的本轮结果取自链接输出。
+
+### M4 TouchKey 与 LED
+
+《FR8029D 开发板使用手册》DEV0.2 第 7 页原理图和第 16 页 Touch 应用说明标出 PC2 与 PC3。SDK v0.3.6 的 `touch_lib/Src/touch_demo.c` 提供两路采样的对照。板级 crate 固定引脚和亮灯电平，FR802x 系列驱动负责 GPIO 和 TouchKey 寄存器，固件提供校准、按键状态和灯光反馈。[板级配置](../../boards/fr8029d-evb/src/lib.rs) · [系列 TouchKey 驱动](../../chips/freqchip/fr802x/common/src/touchkey.rs) · [按键判定](src/touch_feedback.rs)
+
+| 板载器件 | 连接 |
+|---|---|
+| TouchKey TK2 | PC2，经 R56 连接到触摸片，进入逻辑通道 0 |
+| TouchKey TK6 | PC3，经 R58 连接到触摸片，进入逻辑通道 1 |
+| 红色用户灯 D7 | PA5，经 R52 接 LED 后到地，高电平点亮 |
+
+启用 `touchkey-feedback` 后，扫描使用 1 MHz 触摸时钟和 5 ms 周期。启动校准时保持触摸片空闲。每颗键独立累计 16 个有效样本，形成自己的基线。触发阈值为基线的 97%，释放阈值为 98%，两种变化均需连续三个有效样本。采样处于释放状态且与基线相差不超过 1% 时，基线会缓慢跟随。任一键按住时亮灯，两键都释放后灭灯。
+
+控制器报告上溢或下溢时，驱动清除故障标志并重新开启扫描。某一路 25 ms 未收到有效样本时，固件在下一次处理时释放该路的旧按下状态。有效采样恢复后使用原基线重新消抖。该功能使用原有 TIMER0 唤醒和同一个 GATT 前台任务。
+
+在固件目录使用以下构建，FreeRTOS 可为任一组合追加 `ble-gatt-freertos` 并使用 M2 固定的内核。
+
+```sh
+cargo build --locked --offline --release --target thumbv8m.main-none-eabi \
+  --bin fr8029d-ble-adv --features touchkey-feedback,ble-gatt-board,ble-gatt-mac-probe
+cargo build --locked --offline --release --target thumbv8m.main-none-eabi \
+  --bin fr8029d-ble-adv --features touchkey-feedback,ble-gatt-xip-compact
+```
+
+TouchKey 固件需要 `ble-gatt-board` 入口。上述 SRAM 配置显式启用它，Flash 和 FreeRTOS 配置会自动引入。构建前会拒绝纯广播探针和以下超预算组合。
+
+| 启用 TouchKey 时的附加功能 | 构建范围 |
+|---|---|
+| MIC1 采集 | 只允许 FreeRTOS Flash 短包版。配置持久化沿用 `mic1-config-layout-v1`。 |
+| 251 B BLE 长包 | 支持裸机 SRAM，以及两种运行方式的 Flash 镜像。 |
+| OTA 接收 | 使用独立 OTA 镜像。 |
+
+混合功能的结果为链接验证。CI 跑 TouchKey 专项测试、裸机与 FreeRTOS 的 SRAM 和 Flash 构建，并检查拒绝组合的提示。
+
+### M4 评审修复前后资源对照
+
+两组镜像均启用 TouchKey，关闭 MIC1、OTA 和长包，并使用相同链接预算。Flash 镜像的载荷存于 Flash，SRAM 镜像的载荷存于 SRAM。静态 RAM 包括 `.data`、`.bss` 及其对齐开销。启用 TouchKey 前的 M4 对照 Flash 载荷为裸机 65,880 B、FreeRTOS 68,984 B。
+
+| 镜像 | 载荷（修复前 → 修复后） | 静态 RAM | 栈预留总计 | 实测栈余量（修复前 → 修复后） |
+|---|---:|---:|---:|---:|
+| 裸机 SRAM | 66,352 → 66,392 B（+40 B） | 184 B | 16,128 B | 主栈 6,220 → 6,196 B |
+| FreeRTOS SRAM | 69,480 → 69,560 B（+80 B） | 528 B | 15,360 B | BLE 任务栈 3,872 → 3,848 B |
+| 裸机 Flash | 66,832 → 66,880 B（+48 B） | 600 B | 22,272 B | 主栈 12,380 → 12,356 B |
+| FreeRTOS Flash | 69,864 → 69,912 B（+48 B） | 944 B | 19,200 B | BLE 任务栈 6,448 → 6,424 B |
+
+两组的静态 RAM 和栈预留相同。FreeRTOS SRAM 版的镜像链接空间从 152 B 降到 72 B。两种 FreeRTOS 镜像的 BLE 任务栈余量均通过 512 B 验收门槛。
+
+两版 SRAM 镜像均完成真实空闲采样及校准。J-Link 读回两路映射为 `0x54`，空闲状态 PA5 输出锁存位为 0。同一台 Mac 对两版各验证两轮连接及 20 B Notify 回显。复位后回读 SDK 的 Flash 前 12 KiB 一致。此前的隔离 SRAM 测试镜像注入单键、双键及依次释放样本，两版的按键掩码变化均为 `0 → 1 → 3 → 2 → 0 → 2 → 0`，PA5 输出锁存位按 `0 → 1 → 1 → 1 → 0 → 1 → 0` 变化。手指触摸和红灯目视确认待现场验收。
+
+两版 Flash 镜像各通过两轮 Mac 连接、20 B 带响应写入和 Notify 回显。修复版另用 J-Link 临时设置 TouchKey 下溢阈值。故障期间完成采样计数停止，恢复阈值后两版均继续采样。断样释放、单键独立校准和失效后重新消抖由离线回归覆盖。
+
+四轮 Flash 对照结束后分别恢复 SDK v0.3.6。各轮的 1 MiB 全片回读均与备份逐字节一致，最后回读写保护为 `SR1=0x7C`、`SR2=0x02`。

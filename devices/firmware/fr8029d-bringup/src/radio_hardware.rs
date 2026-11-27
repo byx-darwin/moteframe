@@ -6,6 +6,18 @@ pub(super) fn clock() -> Option<u32> {
     unsafe { radio::clock() }
 }
 
+#[cfg(all(feature = "ble-gatt-board", feature = "ble-gatt-event-driven"))]
+pub(super) fn clock_snapshot() -> Option<(u32, u16)> {
+    // SAFETY: The foreground owns the scheduler clock latch.
+    unsafe { radio::clock_snapshot() }
+}
+
+#[cfg(all(feature = "ble-gatt-board", feature = "ble-gatt-event-driven"))]
+pub(super) fn event_end_pending() -> bool {
+    // SAFETY: Only the foreground observes this initialized baseband here.
+    unsafe { radio::event_end_pending() }
+}
+
 #[cfg(feature = "ble-adv-cold")]
 pub(super) fn initialize() -> Result<(), u32> {
     // SAFETY: Reset has initialized the SRAM commands. This foreground owns
