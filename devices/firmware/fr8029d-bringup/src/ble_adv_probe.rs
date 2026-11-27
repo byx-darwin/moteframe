@@ -355,7 +355,7 @@ fn park() -> ! {
     }
 }
 
-#[cfg(feature = "qspi-config")]
+#[cfg(all(feature = "qspi-config", not(feature = "mic1-config-layout-v1")))]
 pub mod qspi_slots;
 
 #[cfg(feature = "ble-gatt-xip")]

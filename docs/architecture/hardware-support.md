@@ -34,3 +34,5 @@ flowchart TD
 ## 首个参考实现
 
 移植先查[富芮坤型号能力表](../../devices/chips/freqchip/README.md)，再查[FR8029D 板载功能、实测状态和验收计划](../../devices/boards/fr8029d-evb/README.md)。接入其他厂商时，在对应厂商目录登记料号能力，按实际板型登记资源与验证结果，再由产品固件选用。
+
+驱动代码分层从 FR8029D 的 MIC1 开始，再依次处理 QSPI 和射频。各阶段进度及板测条件见[实施顺序与验收](../../devices/boards/fr8029d-evb/README.md#实施顺序与验收)。

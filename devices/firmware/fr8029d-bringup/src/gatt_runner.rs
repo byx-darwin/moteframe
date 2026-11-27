@@ -138,7 +138,13 @@ pub fn run<B: LinkBackend, F: FnMut(GattReport)>(
 /// Runs the same GATT application with owner-driven radio service.
 /// The board advances the radio on IRQ, timer and software wakes, including
 /// while the Host receive lane is blocked.
-#[cfg(all(feature = "ble-gatt-event-driven", not(feature = "ble-gatt-dle")))]
+#[cfg(all(
+    feature = "ble-gatt-event-driven",
+    not(any(
+        feature = "ble-gatt-dle",
+        all(feature = "mic1-acquisition", target_arch = "arm")
+    ))
+))]
 pub async fn run_event_driven<B: LinkBackend, F: FnMut(GattReport)>(
     backend: B,
     resources: &mut Resources,
@@ -148,8 +154,14 @@ pub async fn run_event_driven<B: LinkBackend, F: FnMut(GattReport)>(
     run_events(backend, resources, identity, report, None).await
 }
 
-/// Runs the event-driven Host with long-packet queues on the BLE task.
-#[cfg(all(feature = "ble-gatt-event-driven", feature = "ble-gatt-dle"))]
+/// Runs the event-driven Host with its controller queues borrowed in place.
+#[cfg(all(
+    feature = "ble-gatt-event-driven",
+    any(
+        feature = "ble-gatt-dle",
+        all(feature = "mic1-acquisition", target_arch = "arm")
+    )
+))]
 pub fn run_event_driven<B: LinkBackend, F: FnMut(GattReport)>(
     backend: B,
     resources: &mut Resources,
@@ -184,7 +196,13 @@ type OtaCallback<'a> = Option<&'a mut dyn FnMut(Option<&[u8]>) -> bool>;
 
 #[cfg(all(
     feature = "ble-gatt-event-driven",
-    any(not(feature = "ble-gatt-dle"), feature = "ota-v1")
+    any(
+        not(any(
+            feature = "ble-gatt-dle",
+            all(feature = "mic1-acquisition", target_arch = "arm")
+        )),
+        feature = "ota-v1"
+    )
 ))]
 async fn run_events<B: LinkBackend, F: FnMut(GattReport)>(
     backend: B,
@@ -242,6 +260,8 @@ where
         if let Err(error) = service() {
             return Poll::Ready(GattRunError::Host(BleHostError::Controller(error)));
         }
+        #[cfg(all(feature = "mic1-acquisition", target_arch = "arm"))]
+        crate::mic_session::poll();
         let result = if EXTERNAL {
             // The Controller has already advanced. Deliver its observations
             // before the Host resumes any outgoing data.
@@ -328,6 +348,8 @@ where
         parameters.interval_max = interval;
     }
     let mut peripheral = stack.peripheral();
+    #[cfg(all(feature = "mic1-acquisition", target_arch = "arm"))]
+    crate::mic_session::on_boot();
     loop {
         let acceptor = peripheral
             .advertise(
@@ -354,6 +376,8 @@ where
         let mut writes = CommittedWrites::new();
         let out_of_memory = loop {
             let mut bytes = [0; VALUE_LEN];
+            #[cfg(all(feature = "mic1-acquisition", target_arch = "arm"))]
+            let mut response = [0; VALUE_LEN];
             let notification = match profile
                 .handle_with_ota(
                     connection.next().await,
@@ -377,7 +401,10 @@ where
                         length: meta.length,
                         bytes,
                     }));
-                    Notification::Echo(&bytes[..meta.length])
+                    let value = &bytes[..meta.length];
+                    #[cfg(all(feature = "mic1-acquisition", target_arch = "arm"))]
+                    let value = echo_response(value, &mut response);
+                    Notification::Echo(value)
                 }
                 Ok(GattProgress::Disconnected) => break false,
             };
@@ -394,5 +421,26 @@ where
             while !matches!(link.next().await, ConnectionEvent::Disconnected { .. }) {}
         }
         report(GattReport::Disconnected);
+        #[cfg(all(feature = "mic1-acquisition", target_arch = "arm"))]
+        crate::mic_session::on_disconnect();
+    }
+}
+
+#[cfg(all(feature = "mic1-acquisition", target_arch = "arm"))]
+fn echo_response<'a>(value: &'a [u8], response: &'a mut [u8; VALUE_LEN]) -> &'a [u8] {
+    if crate::mic_session::request(value, response) {
+        response
+    } else {
+        value
+    }
+}
+
+/// Caps a board sleep so a running capture gets serviced between BLE events.
+#[cfg(all(feature = "mic1-acquisition", target_arch = "arm"))]
+#[must_use]
+pub fn acquisition_wake_delay(ble_delay_us: Option<u32>) -> Option<u32> {
+    match (ble_delay_us, crate::mic_session::poll_interval_us()) {
+        (Some(ble), Some(mic)) => Some(ble.min(mic)),
+        (ble, mic) => ble.or(mic),
     }
 }

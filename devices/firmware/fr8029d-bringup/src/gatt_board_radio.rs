@@ -335,10 +335,40 @@ mod tests {
             assert_eq!(halfword(hop_state), 0x8800 | channel);
         }
         let start = radio.link.as_ref().ok_or(21_u32)?.event.start.coarse;
-        radio.schedule(start.wrapping_sub(1) & CLOCK_MASK)?;
+        let now = start.wrapping_sub(2) & CLOCK_MASK;
+        super::super::EVENT_CLOCK.set(Some(now));
+        radio.schedule(now)?;
         assert!(radio.pending.is_some());
         // The baseband performs the next hop itself when this slot executes.
         assert_eq!(halfword(hop_state), 0x880b);
+        Ok(())
+    }
+
+    #[cfg(all(
+        feature = "mic1-acquisition",
+        feature = "ble-gatt-xip",
+        not(feature = "ble-gatt-dle")
+    ))]
+    #[test]
+    fn preempted_slot_skips_instead_of_starting_a_completion_watchdog() -> Result<(), u32> {
+        use super::super::{EVENT_CLOCK, SUBMITTED_SLOTS};
+        use super::*;
+        let mut radio = connected_fixture()?;
+        let link = radio.link.as_mut().ok_or(21_u32)?;
+        link.anchor = Some(link.request_time);
+        for lag in [1_u32, 0, u32::MAX] {
+            let start = radio.link.as_ref().ok_or(21_u32)?.event.start.coarse;
+            EVENT_CLOCK.set(Some(start.wrapping_sub(lag) & CLOCK_MASK));
+            radio.schedule(start.wrapping_sub(SLOT_LEAD_TICKS) & CLOCK_MASK)?;
+            assert!(radio.pending.is_none());
+        }
+        assert_eq!(SUBMITTED_SLOTS.get(), 0);
+        assert_eq!(radio.link.as_ref().ok_or(21_u32)?.counter, 3);
+        let start = radio.link.as_ref().ok_or(21_u32)?.event.start.coarse;
+        EVENT_CLOCK.set(Some(start.wrapping_sub(2) & CLOCK_MASK));
+        radio.schedule(start.wrapping_sub(SLOT_LEAD_TICKS) & CLOCK_MASK)?;
+        assert_eq!(SUBMITTED_SLOTS.get(), 1);
+        assert!(radio.pending.is_some());
         Ok(())
     }
 
@@ -660,6 +690,18 @@ impl Link {
                 fine_countdown: self.request_time.fine_countdown,
             })
         };
+    }
+
+    fn skip_event(&mut self) {
+        let start = self.event.start.coarse;
+        diagnostic(31, start);
+        self.apply_map_at_instant();
+        // No slot will execute this event's CSA1 hop. Move the previous
+        // unmapped channel forward once, preserving the other link fields.
+        let hop_state = halfword(CONTROL + 0x18);
+        let next = ((hop_state & 0x3f) + u16::from(self.request.hop)) % 37;
+        set_halfword(CONTROL + 0x18, (hop_state & !0x3f) | next);
+        self.advance(None);
     }
 
     fn prepare_timing_update(&mut self) -> Result<(), u32> {
@@ -1137,19 +1179,10 @@ impl Radio {
             let start = link.event.start.coarse;
             let ahead = start.wrapping_sub(now) & CLOCK_MASK;
             if !(1..HALF_CLOCK).contains(&ahead) {
-                diagnostic(31, start);
-                link.apply_map_at_instant();
-                // No slot will execute this event's CSA1 hop. Move the previous
-                // unmapped channel forward once, preserving the other link fields.
-                let hop_state = halfword(CONTROL + 0x18);
-                let next = ((hop_state & 0x3f) + u16::from(link.request.hop)) % 37;
-                set_halfword(CONTROL + 0x18, (hop_state & !0x3f) | next);
-                link.advance(None);
+                link.skip_event();
                 return self.expire_link(now);
             }
             if ahead <= SLOT_LEAD_TICKS {
-                #[cfg(feature = "ble-gatt-event-driven")]
-                gatt_board_wake::record_connection_lead(ahead);
                 link.apply_map_at_instant();
                 if link.parameters_changed {
                     let limit = 2 * link.request.interval - 3;
@@ -1162,7 +1195,42 @@ impl Radio {
                     link.rx_airtime(link.phy.rx_two_m()),
                     link.slot_tx_airtime(),
                 );
-                let duration = submit_link(self.slot, event, link.counter);
+                #[cfg(all(
+                    feature = "mic1-acquisition",
+                    feature = "ble-gatt-xip",
+                    not(feature = "ble-gatt-dle")
+                ))]
+                let duration = {
+                    // XIP instruction fetch and task preemption can consume the
+                    // original scheduling lead. Sample again while owning the
+                    // CPU through submission. Two coarse ticks leave at least
+                    // one whole 312.5 us tick, independent of fine phase.
+                    let (now, submitted) = critical_section::with(|_| {
+                        let now = clock().ok_or(3_u32)?;
+                        let remaining = start.wrapping_sub(now) & CLOCK_MASK;
+                        let submitted = (2..=SLOT_LEAD_TICKS).contains(&remaining).then(|| {
+                            let duration = submit_link(self.slot, event, link.counter);
+                            gatt_board_wake::record_connection_lead(remaining);
+                            duration
+                        });
+                        Ok::<_, u32>((now, submitted))
+                    })?;
+                    let Some(duration) = submitted else {
+                        link.skip_event();
+                        return self.expire_link(now);
+                    };
+                    duration
+                };
+                #[cfg(not(all(
+                    feature = "mic1-acquisition",
+                    feature = "ble-gatt-xip",
+                    not(feature = "ble-gatt-dle")
+                )))]
+                let duration = {
+                    #[cfg(feature = "ble-gatt-event-driven")]
+                    gatt_board_wake::record_connection_lead(ahead);
+                    submit_link(self.slot, event, link.counter)
+                };
                 self.pending = Some(SlotWatchdog::new(start, duration));
             }
         } else if let Some(advertisement) = self.advertisement
@@ -1285,12 +1353,7 @@ impl LinkBackend for Radio {
 
     #[cfg(not(feature = "ble-gatt-dle"))]
     fn max_acl_fragment_len(&self) -> u8 {
-        // Retain the separately qualified FreeRTOS SRAM probe setting.
-        if cfg!(all(
-            feature = "ble-gatt-mac-probe",
-            feature = "ble-gatt-freertos",
-            not(feature = "ble-gatt-xip")
-        )) {
+        if cfg!(feature = "ble-gatt-freertos") && fr8029d_bringup::connection::WIDE_RECEIVE_WINDOW {
             15
         } else {
             27

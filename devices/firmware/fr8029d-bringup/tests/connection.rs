@@ -180,9 +180,17 @@ fn test_should_decode_and_schedule_the_captured_50_millisecond_interval() -> Res
 }
 
 const UPDATE_IND: [u8; 12] = [0, 1, 4, 0, 6, 0, 0, 0, 0xf4, 1, 0x0b, 0];
-const MAC_PROBE_TIMING: bool = cfg!(all(
-    feature = "ble-gatt-mac-probe",
-    not(feature = "ble-gatt-xip")
+const MAC_PROBE_TIMING: bool = cfg!(any(
+    all(
+        feature = "ble-gatt-mac-probe",
+        not(feature = "ble-gatt-xip")
+    ),
+    all(
+        feature = "mic1-acquisition",
+        feature = "ble-gatt-freertos",
+        feature = "ble-gatt-xip",
+        not(feature = "ble-gatt-dle")
+    )
 ));
 
 #[test]

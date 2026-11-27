@@ -8,15 +8,21 @@ const HALF_US_PER_CONN_UNIT: i64 = 2500;
 const CONNECT_IND_AIRTIME_HALF_US: i64 = 704;
 // The configured FR8029D RX profile has a 40 us base and a 7 us PHY delay.
 const RX_TIMESTAMP_DELAY_HALF_US: i64 = 94;
-// The Mac SRAM probe uses the wider guard exercised by the board acceptance test.
-const RECEIVE_GUARD_HALF_US: i64 = if cfg!(all(
-    feature = "ble-gatt-mac-probe",
-    not(feature = "ble-gatt-xip")
-)) {
-    2_048
-} else {
-    64
-};
+/// Use the wider board-trial receive window for the Mac SRAM probe and the
+/// short-packet MIC1 `FreeRTOS` XIP image.
+pub const WIDE_RECEIVE_WINDOW: bool = cfg!(any(
+    all(
+        feature = "ble-gatt-mac-probe",
+        not(feature = "ble-gatt-xip")
+    ),
+    all(
+        feature = "mic1-acquisition",
+        feature = "ble-gatt-freertos",
+        feature = "ble-gatt-xip",
+        not(feature = "ble-gatt-dle")
+    )
+));
+const RECEIVE_GUARD_HALF_US: i64 = if WIDE_RECEIVE_WINDOW { 2_048 } else { 64 };
 // The control record extends the scheduler's RX window by 14 us.
 const RECEIVE_TAIL_HALF_US: i64 = 28;
 // Legacy 1M RX and TX at 27 octets plus the base event turnaround budget.

@@ -347,8 +347,11 @@ mod arm {
                 if let Some(now) = snapshot {
                     let radio = wake::radio_deadline();
                     let host = critical_section::with(|cs| HOST_DEADLINE.borrow(cs).get());
+                    let delay = next_delay_us(now, now_us, radio, host);
+                    #[cfg(feature = "mic1-acquisition")]
+                    let delay = fr8029d_bringup::gatt_runner::acquisition_wake_delay(delay);
                     wake::wait(
-                        next_delay_us(now, now_us, radio, host),
+                        delay,
                         matches!(radio, Some(RadioDeadline::Completion { .. })),
                     );
                 }

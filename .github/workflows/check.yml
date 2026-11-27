@@ -40,6 +40,15 @@ jobs:
           cargo build --locked --release --manifest-path devices/firmware/fr8029d-bringup/Cargo.toml --target thumbv8m.main-none-eabi --features ble-gatt-freertos,ble-gatt-xip --bin fr8029d-ble-adv
           cargo build --locked --release --manifest-path devices/firmware/fr8029d-bringup/Cargo.toml --target thumbv8m.main-none-eabi --features ble-gatt-freertos,ble-gatt-xip,ble-gatt-event-driven,ble-gatt-dle --bin fr8029d-ble-adv
           cargo build --locked --release --manifest-path devices/firmware/fr8029d-bringup/Cargo.toml --target thumbv8m.main-none-eabi --features ble-gatt-freertos,ble-gatt-xip,ble-gatt-dle --bin fr8029d-ble-adv
+      - name: Test MIC1 scheduling and build both Flash images
+        working-directory: devices/firmware/fr8029d-bringup
+        run: |
+          # Model the Flash task on the host without linking the ARM kernel.
+          RUSTFLAGS='--cfg feature="ble-gatt-freertos" --cfg feature="ble-gatt-xip"' \
+            cargo test --locked --features mic1-acquisition --test board_radio --test mic-session
+          for features in mic1-config-layout-v1 mic1-config-layout-v1,ble-gatt-freertos; do
+            cargo build --locked --release --target thumbv8m.main-none-eabi --bin fr8029d-ble-adv --features "$features"
+          done
       - name: Test OTA and build both receivers with a matching target image
         working-directory: devices/firmware/fr8029d-bringup
         run: |
@@ -89,3 +98,4 @@ jobs:
         run: |
           swift -D BLE_CONNECT_TESTS devices/scripts/ble_connect.swift
           swift -D BLE_SDK_COMPAT_TESTS devices/scripts/ble_sdk_compat.swift
+          swiftc devices/scripts/ble_mic1.swift -o "$RUNNER_TEMP/ble_mic1"

@@ -1,6 +1,20 @@
 //! FR8029D bring-up contracts and an optional upstream GATT profile.
 #![no_std]
-#![forbid(unsafe_code)]
+#![cfg_attr(
+    not(all(feature = "mic1-acquisition", target_arch = "arm")),
+    forbid(unsafe_code)
+)]
+#![deny(unsafe_code)]
+
+#[cfg(all(feature = "mic1-config-layout-v1", target_arch = "arm"))]
+extern crate self as fr8029d_bringup;
+
+#[cfg(all(
+    feature = "mic1-config-layout-v1",
+    feature = "ble-gatt-ota",
+    target_arch = "arm"
+))]
+compile_error!("Select either the MIC configuration writer or the OTA maintenance image");
 
 pub mod advertising;
 pub mod connection;
@@ -9,6 +23,14 @@ pub mod flash_layout;
 pub mod gatt;
 #[cfg(feature = "ble-gatt-probe")]
 pub mod gatt_runner;
+#[cfg(all(feature = "mic1-acquisition", target_arch = "arm"))]
+#[allow(unsafe_code)]
+mod mic1;
+#[cfg(all(feature = "mic1-acquisition", target_arch = "arm"))]
+#[allow(unsafe_code)]
+mod mic_config;
+#[cfg(all(feature = "mic1-acquisition", target_arch = "arm"))]
+mod mic_session;
 #[cfg(feature = "ota-v1")]
 pub mod ota;
 pub mod phy;

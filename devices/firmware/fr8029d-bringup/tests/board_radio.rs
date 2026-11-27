@@ -198,3 +198,18 @@ fn board_offers_full_length_only_when_enabled_and_keeps_rx_queue_compact() {
     assert_eq!(gatt_board_radio::Radio::new().max_acl_fragment_len(), 27);
     assert!(size_of::<gatt_board_radio::Radio>() < 1024);
 }
+
+#[cfg(all(
+    feature = "mic1-acquisition",
+    feature = "ble-gatt-freertos",
+    feature = "ble-gatt-xip",
+    not(feature = "ble-gatt-dle")
+))]
+#[test]
+fn short_mic1_rtos_xip_uses_the_sram_trial_link_profile() {
+    assert_eq!(gatt_board_radio::Radio::new().max_acl_fragment_len(), 15);
+    assert_eq!(
+        gatt_board_radio::Radio::new().supports_two_m(),
+        !cfg!(feature = "ble-gatt-1m-only")
+    );
+}

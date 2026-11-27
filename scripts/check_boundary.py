@@ -86,7 +86,7 @@ DEVICE_ARTIFACT_DIRS = {
 }
 DEVICE_TOP_LEVEL = {
     "devices/.gitignore", "devices/Cargo.toml", "devices/Cargo.lock", "devices/README.md",
-    "devices/scripts/ble_connect.swift", "devices/scripts/ble_sdk_compat.swift",
+    "devices/scripts/ble_connect.swift", "devices/scripts/ble_sdk_compat.swift", "devices/scripts/ble_mic1.swift",
     "devices/docs/superpowers/specs/2026-11-26-fr8029d-sdk-ble-parity.md",
     "devices/docs/superpowers/plans/2026-11-25-fr8029d-event-driven-runtime.md",
 }

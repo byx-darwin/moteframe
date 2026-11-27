@@ -9,19 +9,22 @@ __bare_gatt_sram = !__rtos && __gatt_sram;
 __event_rtos_sram = __gatt_sram && __gatt_event && __rtos;
 /* SDK v0.3.6 starts application SRAM at 0x20001818. Keep the ROM area
    and align our SRAM-only layout to the next vector boundary. */
-__sram_shift = __gatt_sram && DEFINED(__gatt_dle) ? 0x1600 : 0;
+__sram_shift = __gatt_sram && DEFINED(__gatt_dle) ? 0x1600 :
+    (__event_rtos_sram && DEFINED(__gatt_mic1) ? 0x400 : 0);
 __pool_space = DEFINED(__gatt_dle) && !__bare_gatt_sram ? 0x600 : 0;
 /* Preserve the 512-byte MSP and diagnostics below the aligned event image. */
 __rtos_event_image = DEFINED(__gatt_dle) ? 0x20006e00 : 0x20007000;
 __image_origin = __gatt_sram ? (__rtos ? (__gatt_event ? __rtos_event_image : 0x20008000)
                                     : (__gatt_event ? 0x20007a00 : 0x20008e00)) - __sram_shift + __pool_space :
     (DEFINED(__probe_in_sram) ? 0x20003000 : 0x10002000);
-__gatt_flash_budget = (DEFINED(__gatt_ota) ? 2K : 0) + (__rtos ? 72K : (__gatt_event ? 68K : 64K)) + (DEFINED(__gatt_dle) ? 8K : 0);
+__gatt_flash_budget = (DEFINED(__gatt_ota) ? 2K : 0) + (DEFINED(__gatt_mic1) ? 2K : 0) +
+    (__rtos ? 72K : (__gatt_event ? 68K : 64K)) + (DEFINED(__gatt_dle) ? 8K : 0);
 __image_length = __gatt_sram ? 0x20018000 - __image_origin :
     (DEFINED(__gatt_board_probe) ? __gatt_flash_budget :
     (DEFINED(__probe_in_sram) ? __sram_image_size : 232K));
 __ram_origin = DEFINED(__probe_in_sram) && !DEFINED(__gatt_board_probe)
-    ? 0x20003000 + __sram_image_size : 0x20003000 - __sram_shift;
+    ? 0x20003000 + __sram_image_size : 0x20003000 - __sram_shift -
+    (!__gatt_sram && __rtos && DEFINED(__gatt_mic1) ? 0x100 : 0);
 /* The event-driven SRAM trial uses 768 bytes for static RAM before the variant-specific pool and task stacks. */
 __ram_limit = (__rtos ? (__event_rtos_sram ? 0x20003300 : 0x20003400) :
     (__bare_gatt_sram ? 0x20003a00 : (DEFINED(__gatt_board_probe) ? 0x20004000 : 0x20006f00))) - __sram_shift + __pool_space;
