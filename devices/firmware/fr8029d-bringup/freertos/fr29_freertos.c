@@ -1,7 +1,9 @@
 #include "FreeRTOS.h"
 #include "task.h"
 
-#ifdef FR29_EVENT_SRAM
+#if defined(FR29_OTA_XIP)
+#define FR29_BLE_STACK_BYTES 19456U
+#elif defined(FR29_EVENT_SRAM)
 #define FR29_BLE_STACK_BYTES 13312U
 #else
 #define FR29_BLE_STACK_BYTES 16384U

@@ -19,6 +19,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR")?);
+    #[cfg(feature = "ble-gatt-ota")]
+    pin_ota_image()?;
     let script = manifest_dir.join("link.x");
     println!("cargo:rerun-if-changed=link.x");
     if startup_probe {
@@ -115,6 +117,9 @@ fn build_freertos(manifest_dir: &Path) -> Result<(), Box<dyn Error>> {
             )
             .with_extension("o");
         let mut command = Command::new(&clang);
+        if cfg!(feature = "ble-gatt-ota") {
+            command.arg("-DFR29_OTA_XIP=1");
+        }
         if event_driven {
             command.arg("-DFR29_EVENT_DRIVEN=1");
             if env::var_os("CARGO_FEATURE_BLE_GATT_XIP").is_none() {
@@ -158,5 +163,27 @@ fn build_freertos(manifest_dir: &Path) -> Result<(), Box<dyn Error>> {
             object.display()
         );
     }
+    Ok(())
+}
+
+#[cfg(feature = "ble-gatt-ota")]
+#[path = "src/ota_policy.rs"]
+mod ota_policy;
+
+#[cfg(feature = "ble-gatt-ota")]
+fn pin_ota_image() -> Result<(), Box<dyn Error>> {
+    println!("cargo:rerun-if-env-changed=FR29_OTA_IMAGE");
+    let path = std::fs::canonicalize(env::var("FR29_OTA_IMAGE")?)?;
+    println!("cargo:rerun-if-changed={}", path.display());
+    if !(36..=232 * 1024).contains(&std::fs::metadata(&path)?.len()) {
+        return Err("FR29_OTA_IMAGE must be a layout-v1 raw application".into());
+    }
+    let data = std::fs::read(path)?;
+    let policy = ota_policy::manifest(&data).ok_or("unrepresentable image length")?;
+    std::fs::write(
+        PathBuf::from(env::var("OUT_DIR")?).join("ota-manifest.bin"),
+        policy,
+    )?;
+    println!("cargo:rustc-link-arg-bin=fr8029d-ble-adv=--defsym=__gatt_ota=1");
     Ok(())
 }

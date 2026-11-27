@@ -159,6 +159,17 @@ impl GattProfile {
         event: GattConnectionEvent<'_, '_, P>,
         writes: &mut CommittedWrites,
     ) -> Result<GattProgress, GattError> {
+        self.handle_with_ota(event, writes, None, &mut |_| false)
+            .await
+    }
+
+    pub(crate) async fn handle_with_ota<P: PacketPool>(
+        &self,
+        event: GattConnectionEvent<'_, '_, P>,
+        writes: &mut CommittedWrites,
+        ota_handle: Option<u16>,
+        dispatch: &mut impl FnMut(Option<&[u8]>) -> bool,
+    ) -> Result<GattProgress, GattError> {
         let event = match event {
             GattConnectionEvent::Gatt { event } => event,
             GattConnectionEvent::Disconnected { .. } => return Ok(GattProgress::Disconnected),
@@ -173,6 +184,15 @@ impl GattProfile {
                     drop(write.into_payload());
                     return Ok(GattProgress::Continue);
                 };
+                if cfg!(feature = "ota-v1") && Some(handle) == ota_handle {
+                    let reply = if dispatch(Some(data)) {
+                        write.accept_unprocessed()
+                    } else {
+                        write.reject(AttErrorCode::VALUE_NOT_ALLOWED)
+                    };
+                    reply.map_err(GattError::Host)?.send().await;
+                    return Ok(GattProgress::Continue);
+                }
                 let progress = if handle == self.value.handle {
                     if !(1..=VALUE_LEN).contains(&data.len()) {
                         Err(AttErrorCode::INVALID_ATTRIBUTE_VALUE_LENGTH)

@@ -14,3 +14,9 @@ Periphreal = "Periphreal"
 
 [default.extend-identifiers]
 UI_BLOOD_OXYGEN_PECENT_11x10 = "UI_BLOOD_OXYGEN_PECENT_11x10"
+
+[type.arm-assembly]
+extend-glob = ["*.s"]
+[type.arm-assembly.extend-words]
+# Thumb bitwise AND with condition flags.
+ands = "ands"

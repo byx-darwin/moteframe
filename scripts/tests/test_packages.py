@@ -26,6 +26,9 @@ class PackageTests(unittest.TestCase):
     def test_should_accept_portable_storage_and_ble_packages(self):
         for package, test in [("moteframe-storage", "read"), ("moteframe-ble", "values")]:
             files = ["Cargo.toml", "Cargo.lock", "README.md", "LICENSE", "NOTICE", "src/lib.rs", f"tests/{test}.rs", "tests/debug.rs"]
+            if package == "moteframe-storage":
+                files.extend(["src/deferred.rs", "src/snapshot.rs", "src/write.rs",
+                              "tests/deferred.rs", "tests/snapshot.rs"])
             with self.subTest(package=package):
                 self.assertEqual(MODULE.validate_package(package, files), [])
                 self.assertTrue(MODULE.validate_package(package, files + ["src/vendor.rs"]))

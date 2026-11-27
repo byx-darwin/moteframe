@@ -4,10 +4,13 @@
 
 pub mod advertising;
 pub mod connection;
+pub mod flash_layout;
 #[cfg(feature = "ble-gatt-probe")]
 pub mod gatt;
 #[cfg(feature = "ble-gatt-probe")]
 pub mod gatt_runner;
+#[cfg(feature = "ota-v1")]
+pub mod ota;
 pub mod phy;
 pub mod radio_trim;
 #[cfg(feature = "ble-gatt-probe")]
@@ -160,3 +163,6 @@ impl DescriptorRegion {
         Ok(PACKET_RAM_BASE + self.offset + index * self.kind.stride())
     }
 }
+
+#[cfg(feature = "qspi-config")]
+pub mod qspi_config;

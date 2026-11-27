@@ -80,8 +80,15 @@ const LEGACY_ADV_LEN: usize = 14;
 const NOTIFY_ACK_SESSION: usize = 33;
 const NOTIFY_ACK_LOW: usize = 34;
 const NOTIFY_ACK_HIGH: usize = 35;
-// Use a fresh probe identity for the GATT database revision that adds FFF0.
-const ADDRESS_SUFFIX: u8 = if cfg!(feature = "ble-gatt-freertos") {
+// Maintenance and ordinary applications expose different GATT databases.
+// Keep their probe identities distinct so centrals rediscover the OTA characteristic.
+const ADDRESS_SUFFIX: u8 = if cfg!(feature = "ble-gatt-ota") {
+    if cfg!(feature = "ble-gatt-freertos") {
+        0xc6
+    } else {
+        0xc5
+    }
+} else if cfg!(feature = "ble-gatt-freertos") {
     0xc2
 } else if cfg!(feature = "ble-gatt-xip") {
     0xc1

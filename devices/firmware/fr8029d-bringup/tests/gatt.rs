@@ -625,3 +625,88 @@ fn check_advertisement(radio: &ScriptedRadio) {
         b"\x02\x01\x06\x0a\x09FR29-GATT"
     );
 }
+
+#[cfg(all(feature = "ota-v1", feature = "ble-gatt-event-driven"))]
+#[path = "common/ota_medium.rs"]
+mod ota_medium;
+
+#[cfg(all(feature = "ota-v1", feature = "ble-gatt-event-driven"))]
+#[test]
+fn ota_characteristic_rejects_oversize_and_publishes_only_after_finish() {
+    use fr8029d_bringup::{
+        gatt_runner::run_event_driven_ota,
+        ota::{MAGIC, MARKER, Receiver},
+    };
+    use ota_medium::{Nor, begin, crc32, image};
+
+    let _fixture = HOST_FIXTURE.lock().unwrap();
+    let radio = ScriptedRadio::default();
+    let mut resources = Resources::new();
+    let connected = Cell::new(false);
+    let data = image(0x3a000);
+    let mut nor = Nor::new();
+    {
+        let mut rx = Receiver::new(&mut nor, fr8029d_bringup::ota::manifest(&data).unwrap());
+        let mut receive = |frame: Option<&[u8]>| {
+            if let Some(frame) = frame {
+                rx.receive(frame).is_ok()
+            } else {
+                rx.abort();
+                true
+            }
+        };
+        let identity = GattIdentity {
+            address: RandomAddress::new([1, 2, 3, 4, 5, 0xc0]).unwrap(),
+            version: Version::new(8, 0xffff, 1),
+            name: "FR29-OTA",
+            advertising_data: &[2, 1, 6],
+        };
+        let mut app = pin!(run_event_driven_ota(
+            radio.clone(),
+            &mut resources,
+            identity,
+            |event| connected.set(event == GattReport::Connected),
+            &mut receive
+        ));
+        let mut pump = fixture_pump(app.as_mut(), &radio, false);
+        pump_until(&mut pump, || radio.0.borrow().advertising);
+        radio.event(LinkEvent::Connected(
+            Peer::new([7; 6], true),
+            ConnectionParameters::new(24, 0, 72).unwrap(),
+        ));
+        pump_until(&mut pump, || connected.get());
+        let uuid = 0x2f8029e0_7ff7_48b0_a64e_d6ebc735b251_u128.to_le_bytes();
+        radio.exchange(
+            &mut pump,
+            &[0x10, 19, 0, 0xff, 0xff, 0, 0x28],
+            &[&[0x11, 20, 19, 0, 0xff, 0xff][..], &uuid].concat(),
+        );
+        let write = [0x12, 21, 0];
+        radio.exchange(
+            &mut pump,
+            &[&write[..], &begin(0x3a001, 0)].concat(),
+            &[1, 0x12, 21, 0, 0x13],
+        );
+        radio.exchange(
+            &mut pump,
+            &[&write[..], &begin(0x3a000, crc32(&data))].concat(),
+            &[0x13],
+        );
+        for (i, chunk) in data.chunks(15).enumerate() {
+            radio.exchange(
+                &mut pump,
+                &[
+                    &write[..],
+                    &[2],
+                    &u32::try_from(i * 15).unwrap().to_le_bytes(),
+                    chunk,
+                ]
+                .concat(),
+                &[0x13],
+            );
+        }
+        radio.exchange(&mut pump, &[0x12, 21, 0, 3], &[0x13]);
+    }
+    assert_eq!(nor.word(MARKER), MAGIC);
+    nor.check_neighbors();
+}

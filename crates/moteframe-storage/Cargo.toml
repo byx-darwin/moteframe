@@ -14,3 +14,7 @@ moteframe-core.workspace = true
 
 [lints]
 workspace = true
+
+[features]
+write = []
+config-store = ["write"]

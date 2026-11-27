@@ -40,6 +40,25 @@ jobs:
           cargo build --locked --release --manifest-path devices/firmware/fr8029d-bringup/Cargo.toml --target thumbv8m.main-none-eabi --features ble-gatt-freertos,ble-gatt-xip --bin fr8029d-ble-adv
           cargo build --locked --release --manifest-path devices/firmware/fr8029d-bringup/Cargo.toml --target thumbv8m.main-none-eabi --features ble-gatt-freertos,ble-gatt-xip,ble-gatt-event-driven,ble-gatt-dle --bin fr8029d-ble-adv
           cargo build --locked --release --manifest-path devices/firmware/fr8029d-bringup/Cargo.toml --target thumbv8m.main-none-eabi --features ble-gatt-freertos,ble-gatt-xip,ble-gatt-dle --bin fr8029d-ble-adv
+      - name: Test OTA and build both receivers with a matching target image
+        working-directory: devices/firmware/fr8029d-bringup
+        run: |
+          cargo test --locked --features ota-v1,qspi-config,ble-gatt-event-driven
+          for runtime in bare freertos; do
+            extra=""
+            if [ "$runtime" = freertos ]; then extra=",ble-gatt-freertos"; fi
+            target=thumbv8m.main-none-eabi
+            cargo build --locked --release --target "$target" --bin fr8029d-ble-adv --features "ble-gatt-xip-compact,ble-gatt-event-driven$extra"
+            export FR29_OTA_IMAGE="$RUNNER_TEMP/$runtime-next.bin"
+            PYTHONPATH=tools python3 - "target/$target/release/fr8029d-ble-adv" "$FR29_OTA_IMAGE" <<'PYTHON'
+          from pathlib import Path
+          import sys
+          from gatt_notify_memory import inspect_image
+          image = inspect_image(Path(sys.argv[1]).read_bytes(), xip=True)
+          Path(sys.argv[2]).write_bytes(b"".join(data for _, data in image.loads))
+          PYTHON
+            cargo build --locked --release --target "$target" --bin fr8029d-ble-adv --features "ble-gatt-ota$extra"
+          done
       - name: Validate standard event-driven SRAM images and interrupt vectors
         working-directory: devices/firmware/fr8029d-bringup
         run: |

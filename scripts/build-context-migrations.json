@@ -112,6 +112,64 @@
       "name": "portable-assets-input-2026-11-03-i2c",
       "reason": "Add independently selected assets/input with existing upstream dependencies only. Preserve frozen legacy measurements, profiles, compiler, probes and configuration; exact graph transition only.",
       "reference_sha256": "fee9a7cda47764ef29ca5b05b5c068e317c18e9f102d386ee9ebd9b6098e077c"
+    },
+    {
+      "after": {
+        "lock_sha256": "0dd1ff4a53798591b4600f7fbd5cbf0b3ba3de20d0031d31c3d85893b89c8514",
+        "manifests": {
+          "Cargo.toml": "a4bc707b1cb0dce0decb7b27a9e5fa979ad8f389e2050eecf7308a2b0b3a6bea",
+          "crates/moteframe-assets/Cargo.toml": "ccdbb09ac8ddda7ee3e1669d152e5722c8a91541e78892289a51ae0c33afda37",
+          "crates/moteframe-ble/Cargo.toml": "5f243158ca66b70d005e315d4dd13fc44b19c8a2ae986489247d6c32e94e3490",
+          "crates/moteframe-core/Cargo.toml": "703484b66b8b7b3a70d6ecdb95afe029cf313c7148d457771255575bc3abb955",
+          "crates/moteframe-display/Cargo.toml": "a1b289c84c3b1c0fb9f4037af78e3f80917477504ba30cca7f4e361a5cd7fb5b",
+          "crates/moteframe-i2c/Cargo.toml": "c5061af2f9a4afccae332931d6da8308e50f2ea10d635be1e34235c4f11939ba",
+          "crates/moteframe-input/Cargo.toml": "2e7966e7ffd77af9879fa5185282ec37af233fb4b0edf0a20e3f3c5d1da85094",
+          "crates/moteframe-storage/Cargo.toml": "cc643ddc4bb2076da7af9b3c8852c688848459c703381f35771c96e7a68e1ae9",
+          "crates/moteframe-ui/Cargo.toml": "8969a803131418b3ff9bfd0d02ed8b02f1d10298411c9fc21fbc97c12b744319"
+        }
+      },
+      "before": {
+        "lock_sha256": "a2adbb726e5202257b953f260711876397dad932e2636ce557a43d928b9fb628",
+        "manifests": {
+          "Cargo.toml": "f90806dfe1653b336172778bdd433f0b847e3b8fb8b53df7c7ba60c213319dde",
+          "crates/moteframe-core/Cargo.toml": "703484b66b8b7b3a70d6ecdb95afe029cf313c7148d457771255575bc3abb955",
+          "crates/moteframe-display/Cargo.toml": "a1b289c84c3b1c0fb9f4037af78e3f80917477504ba30cca7f4e361a5cd7fb5b",
+          "crates/moteframe-i2c/Cargo.toml": "c5061af2f9a4afccae332931d6da8308e50f2ea10d635be1e34235c4f11939ba",
+          "crates/moteframe-ui/Cargo.toml": "8969a803131418b3ff9bfd0d02ed8b02f1d10298411c9fc21fbc97c12b744319"
+        }
+      },
+      "name": "storage-config-features-2026-11-27-core",
+      "reason": "Add the write and config-store features without changing default features, dependencies or the workspace lockfile. Retain the frozen core and I2C resource limits.",
+      "reference_sha256": "e892813a7e6f8f5a16e4c92d6459ead9d1810d291b9682f74e05962faa817336"
+    },
+    {
+      "after": {
+        "lock_sha256": "0dd1ff4a53798591b4600f7fbd5cbf0b3ba3de20d0031d31c3d85893b89c8514",
+        "manifests": {
+          "Cargo.toml": "a4bc707b1cb0dce0decb7b27a9e5fa979ad8f389e2050eecf7308a2b0b3a6bea",
+          "crates/moteframe-assets/Cargo.toml": "ccdbb09ac8ddda7ee3e1669d152e5722c8a91541e78892289a51ae0c33afda37",
+          "crates/moteframe-ble/Cargo.toml": "5f243158ca66b70d005e315d4dd13fc44b19c8a2ae986489247d6c32e94e3490",
+          "crates/moteframe-core/Cargo.toml": "703484b66b8b7b3a70d6ecdb95afe029cf313c7148d457771255575bc3abb955",
+          "crates/moteframe-display/Cargo.toml": "a1b289c84c3b1c0fb9f4037af78e3f80917477504ba30cca7f4e361a5cd7fb5b",
+          "crates/moteframe-i2c/Cargo.toml": "c5061af2f9a4afccae332931d6da8308e50f2ea10d635be1e34235c4f11939ba",
+          "crates/moteframe-input/Cargo.toml": "2e7966e7ffd77af9879fa5185282ec37af233fb4b0edf0a20e3f3c5d1da85094",
+          "crates/moteframe-storage/Cargo.toml": "cc643ddc4bb2076da7af9b3c8852c688848459c703381f35771c96e7a68e1ae9",
+          "crates/moteframe-ui/Cargo.toml": "8969a803131418b3ff9bfd0d02ed8b02f1d10298411c9fc21fbc97c12b744319"
+        }
+      },
+      "before": {
+        "lock_sha256": "a2adbb726e5202257b953f260711876397dad932e2636ce557a43d928b9fb628",
+        "manifests": {
+          "Cargo.toml": "f90806dfe1653b336172778bdd433f0b847e3b8fb8b53df7c7ba60c213319dde",
+          "crates/moteframe-core/Cargo.toml": "703484b66b8b7b3a70d6ecdb95afe029cf313c7148d457771255575bc3abb955",
+          "crates/moteframe-display/Cargo.toml": "a1b289c84c3b1c0fb9f4037af78e3f80917477504ba30cca7f4e361a5cd7fb5b",
+          "crates/moteframe-i2c/Cargo.toml": "c5061af2f9a4afccae332931d6da8308e50f2ea10d635be1e34235c4f11939ba",
+          "crates/moteframe-ui/Cargo.toml": "8969a803131418b3ff9bfd0d02ed8b02f1d10298411c9fc21fbc97c12b744319"
+        }
+      },
+      "name": "storage-config-features-2026-11-27-i2c",
+      "reason": "Add the write and config-store features without changing default features, dependencies or the workspace lockfile. Retain the frozen core and I2C resource limits.",
+      "reference_sha256": "fee9a7cda47764ef29ca5b05b5c068e317c18e9f102d386ee9ebd9b6098e077c"
     }
   ]
 }

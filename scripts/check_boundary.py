@@ -24,7 +24,10 @@ RUST_FILES = {
     },
     "moteframe-display": {"src/lib.rs", "src/spi.rs", "src/shared.rs", "tests/recovery.rs", "tests/shared.rs", "tests/spi.rs", "tests/stream.rs"},
     "moteframe-i2c": {"src/lib.rs", "src/resources.rs", "src/checked.rs", "tests/read.rs", "tests/extensions.rs", "tests/wire.rs"},
-    "moteframe-storage": {"src/lib.rs", "tests/read.rs", "tests/debug.rs"},
+    "moteframe-storage": {
+        "src/lib.rs", "src/deferred.rs", "src/snapshot.rs", "src/write.rs",
+        "tests/read.rs", "tests/debug.rs", "tests/deferred.rs", "tests/snapshot.rs",
+    },
     "moteframe-ble": {"src/lib.rs", "tests/values.rs", "tests/debug.rs"},
     "moteframe-assets": {"src/lib.rs", "src/raster.rs", "src/formats.rs", "tests/raster.rs", "tests/ui.rs"},
     "moteframe-input": {"src/lib.rs", "src/queue.rs", "src/button.rs", "src/touch.rs", "tests/input.rs"},

@@ -26,7 +26,8 @@ use core::{
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use moteframe_ble::WriteBufferError;
 
-const ATTRIBUTES: usize = GAP_SERVICE_ATTRIBUTE_COUNT + ATTRIBUTE_COUNT;
+const ATTRIBUTES: usize =
+    GAP_SERVICE_ATTRIBUTE_COUNT + ATTRIBUTE_COUNT + if cfg!(feature = "ota-v1") { 3 } else { 0 };
 
 /// Static identity and legacy advertising payload assigned by the board.
 #[derive(Clone, Copy)]
@@ -123,13 +124,14 @@ pub fn run<B: LinkBackend, F: FnMut(GattReport)>(
         // into another future on the BLE task stack.
         async move {
             let hci = HciController::new(Controller::new(backend, identity.version));
-            run_hci::<false, _, _, _>(hci.borrowed(), resources, identity, report, || Ok(())).await
+            run_hci::<false, _, _, _>(hci.borrowed(), resources, identity, report, None, || Ok(()))
+                .await
         }
     }
     #[cfg(not(feature = "ble-gatt-dle"))]
     {
         let hci = HciController::new(Controller::new(backend, identity.version));
-        run_hci::<false, _, _, _>(hci, resources, identity, report, || Ok(()))
+        run_hci::<false, _, _, _>(hci, resources, identity, report, None, || Ok(()))
     }
 }
 
@@ -143,8 +145,34 @@ pub async fn run_event_driven<B: LinkBackend, F: FnMut(GattReport)>(
     identity: GattIdentity,
     report: F,
 ) -> GattRunError<B::Error> {
+    run_events(backend, resources, identity, report, None).await
+}
+
+/// Run the event-driven Host with the layout-v1 OTA write service. A `None`
+/// frame signals a new connection and clears any abandoned session.
+#[cfg(all(feature = "ble-gatt-event-driven", feature = "ota-v1"))]
+pub async fn run_event_driven_ota<B: LinkBackend, F: FnMut(GattReport)>(
+    backend: B,
+    resources: &mut Resources,
+    identity: GattIdentity,
+    report: F,
+    receive: &mut dyn FnMut(Option<&[u8]>) -> bool,
+) -> GattRunError<B::Error> {
+    run_events(backend, resources, identity, report, Some(receive)).await
+}
+
+type OtaCallback<'a> = Option<&'a mut dyn FnMut(Option<&[u8]>) -> bool>;
+
+#[cfg(feature = "ble-gatt-event-driven")]
+async fn run_events<B: LinkBackend, F: FnMut(GattReport)>(
+    backend: B,
+    resources: &mut Resources,
+    identity: GattIdentity,
+    report: F,
+    ota: OtaCallback<'_>,
+) -> GattRunError<B::Error> {
     let hci = HciController::new_with_external_wake(Controller::new(backend, identity.version));
-    run_hci::<true, _, _, _>(hci.borrowed(), resources, identity, report, || {
+    run_hci::<true, _, _, _>(hci.borrowed(), resources, identity, report, ota, || {
         hci.service()
     })
     .await
@@ -155,6 +183,7 @@ async fn run_hci<const EXTERNAL: bool, C, E, F>(
     resources: &mut Resources,
     identity: GattIdentity,
     report: F,
+    ota: OtaCallback<'_>,
     mut service: impl FnMut() -> Result<(), HciError<E>>,
 ) -> GattRunError<E>
 where
@@ -186,7 +215,7 @@ where
         }
     });
     let mut control = pin!(control.run());
-    let mut app = pin!(serve(&stack, identity, report));
+    let mut app = pin!(serve(&stack, identity, report, ota));
     poll_fn(|cx| {
         if let Err(error) = service() {
             return Poll::Ready(GattRunError::Host(BleHostError::Controller(error)));
@@ -224,10 +253,29 @@ fn poll_application<F: Future>(app: Pin<&mut F>, cx: &mut Context<'_>) -> Poll<F
     app.poll(cx)
 }
 
+#[cfg(feature = "ota-v1")]
+fn add_ota_service(table: &mut AttributeTable<'_, NoopRawMutex, ATTRIBUTES>) -> u16 {
+    use ble_host_trouble::host::prelude::{CharacteristicProp, Service};
+    let mut service = table.add_service(Service::new(
+        0x2f8029e0_7ff7_48b0_a64e_d6ebc735b251_u128.to_le_bytes(),
+    ));
+    let handle = service
+        .add_characteristic_small(
+            0x2f8029e1_7ff7_48b0_a64e_d6ebc735b251_u128.to_le_bytes(),
+            [CharacteristicProp::Write],
+            0_u8,
+        )
+        .build()
+        .handle;
+    service.build();
+    handle
+}
+
 async fn serve<C, E, F>(
     stack: &Stack<'_, C, DefaultPacketPool>,
     identity: GattIdentity,
     mut report: F,
+    mut ota: OtaCallback<'_>,
 ) -> Result<Infallible, GattRunError<E>>
 where
     C: ble_host_trouble::host::Controller<Error = HciError<E>>,
@@ -240,6 +288,10 @@ where
         .build(&mut table)
         .map_err(GattRunError::Gap)?;
     let profile = GattProfile::add(&mut table, &mut storage).map_err(|_| GattRunError::Profile)?;
+    #[cfg(feature = "ota-v1")]
+    let ota_handle = ota.as_ref().map(|_| add_ota_service(&mut table));
+    #[cfg(not(feature = "ota-v1"))]
+    let ota_handle = None;
     let server = AttributeServer::<_, DefaultPacketPool, ATTRIBUTES, 1>::new(table);
     let mut parameters = AdvertisementParameters::default();
     if cfg!(all(
@@ -271,11 +323,24 @@ where
             .await
             .and_then(|connection| connection.with_attribute_server(&server))
             .map_err(|error| GattRunError::Host(BleHostError::BleHost(error)))?;
+        if cfg!(feature = "ota-v1")
+            && let Some(receive) = ota.as_mut()
+        {
+            receive(None);
+        }
         report(GattReport::Connected);
         let mut writes = CommittedWrites::new();
         let out_of_memory = loop {
             let mut bytes = [0; VALUE_LEN];
-            let notification = match profile.handle(connection.next().await, &mut writes).await {
+            let notification = match profile
+                .handle_with_ota(
+                    connection.next().await,
+                    &mut writes,
+                    ota_handle,
+                    &mut |frame| ota.as_mut().is_some_and(|f| f(frame)),
+                )
+                .await
+            {
                 Err(GattError::Host(Error::OutOfMemory)) => break true,
                 Err(error) => return Err(GattRunError::Gatt(error)),
                 Ok(GattProgress::Continue) => continue,

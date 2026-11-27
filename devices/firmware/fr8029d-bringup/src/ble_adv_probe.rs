@@ -22,7 +22,10 @@ use fr8029d_bringup::{
     advertising::{CLOCK_MASK, SLOT_STRIDE, status_slot},
 };
 
-#[cfg(all(feature = "ble-gatt-board", not(feature = "ble-gatt-xip")))]
+#[cfg(any(
+    all(feature = "ble-gatt-board", not(feature = "ble-gatt-xip")),
+    feature = "ble-gatt-xip-compact"
+))]
 global_asm!(include_str!("compact_memory.s"), options(raw));
 
 global_asm!(
@@ -295,6 +298,15 @@ extern "C" fn fr8029d_probe_main(boot_vtor: u32) -> ! {
             diagnostic(2, 2);
             park();
         }
+        #[cfg(feature = "ble-gatt-xip")]
+        if !boot_protection::ensure(|command, value| {
+            // SAFETY: Reset_Handler copied the QSPI routine to SRAM and masked
+            // interrupts. No task, radio or other Flash owner has started yet.
+            unsafe { fr29_slot_command(command, 0, value as usize, protection_stall) }
+        }) {
+            diagnostic(2, 0x5052);
+            park();
+        }
         // SAFETY: The symbol is the lower limit of the linker-reserved MSP
         // stack. The probe always runs in privileged Thread mode on MSP.
         unsafe {
@@ -340,5 +352,27 @@ fn park() -> ! {
     loop {
         // SAFETY: WFI does not dereference memory or change the stack and waits with IRQs masked.
         unsafe { asm!("wfi", options(nomem, nostack, preserves_flags)) };
+    }
+}
+
+#[cfg(feature = "qspi-config")]
+pub mod qspi_slots;
+
+#[cfg(feature = "ble-gatt-xip")]
+mod boot_protection;
+
+#[cfg(all(feature = "ble-gatt-xip", not(feature = "qspi-config")))]
+global_asm!(include_str!("qspi_slots.s"), options(raw));
+
+#[cfg(feature = "ble-gatt-xip")]
+unsafe extern "C" {
+    fn fr29_slot_command(op: u32, address: u32, data: usize, stall: extern "C" fn() -> !) -> u32;
+}
+
+#[cfg(feature = "ble-gatt-xip")]
+#[unsafe(link_section = ".ramfunc.protection_stall")]
+extern "C" fn protection_stall() -> ! {
+    loop {
+        core::hint::spin_loop();
     }
 }

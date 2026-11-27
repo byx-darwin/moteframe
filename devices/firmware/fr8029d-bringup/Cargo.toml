@@ -8,6 +8,8 @@ publish = false
 [workspace]
 
 [dependencies]
+sha2 = { version = "=0.10.9", optional = true, default-features = false }
+moteframe-storage = { path = "../../../crates/moteframe-storage", optional = true, features = ["config-store"] }
 heapless = { version = "=0.9.3", default-features = false, optional = true }
 ble-controller = { path = "../../crates/ble-controller", version = "=0.1.0", default-features = false, optional = true }
 ble-host-trouble = { path = "../../crates/ble-host-trouble", version = "=0.1.0", default-features = false, optional = true }
@@ -16,11 +18,17 @@ embassy-sync = { version = "=0.8.0", default-features = false, optional = true }
 embassy-time-driver = { version = "=0.2.2", default-features = false, features = ["tick-hz-1_000_000"], optional = true }
 moteframe-ble = { path = "../../../crates/moteframe-ble", version = "=0.2.0", default-features = false, optional = true }
 
+[build-dependencies]
+sha2 = { version = "=0.10.9", optional = true, default-features = false }
+
 [dev-dependencies]
 critical-section = { version = "=1.2.0", default-features = false, features = ["std"] }
 embassy-time = { version = "=0.5.1", default-features = false, features = ["std", "generic-queue-8"] }
 
 [features]
+ota-v1 = ["dep:sha2"]
+ble-gatt-ota = ["ota-v1", "qspi-config", "ble-gatt-xip-compact", "ble-gatt-event-driven"]
+qspi-config = ["dep:moteframe-storage"]
 probe = []
 ram-probe = ["probe"]
 ble-adv-probe = []
@@ -31,6 +39,7 @@ ble-gatt-probe = ["dep:heapless", "dep:ble-controller", "dep:ble-host-trouble", 
 ble-gatt-board = ["ble-connect-probe", "ble-gatt-probe", "dep:critical-section", "dep:embassy-time-driver"]
 ble-gatt-mac-probe = ["ble-gatt-probe"]
 ble-gatt-xip = ["ble-gatt-board", "ble-adv-cold-xip"]
+ble-gatt-xip-compact = ["ble-gatt-xip"]
 ble-gatt-1m-only = ["ble-gatt-board"]
 ble-gatt-dle = ["ble-gatt-probe", "ble-controller/data-length", "ble-host-trouble/extended-mtu"]
 ble-gatt-freertos = ["ble-gatt-board"]

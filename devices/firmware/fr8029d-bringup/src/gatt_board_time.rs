@@ -79,7 +79,7 @@ mod arm {
     use embassy_time_driver::Driver;
     #[cfg(not(feature = "ble-gatt-event-driven"))]
     use fr8029d_bringup::gatt_runner::run as run_gatt;
-    #[cfg(feature = "ble-gatt-event-driven")]
+    #[cfg(all(feature = "ble-gatt-event-driven", not(feature = "ble-gatt-ota")))]
     use fr8029d_bringup::gatt_runner::run_event_driven as run_gatt;
     use fr8029d_bringup::gatt_runner::{GattIdentity, GattReport, GattRunError, Resources};
     #[cfg(feature = "ble-gatt-event-driven")]
@@ -287,6 +287,32 @@ mod arm {
             let mut report = Report::default();
             #[cfg(feature = "ble-gatt-event-driven")]
             wake::init();
+            #[cfg(feature = "ble-gatt-ota")]
+            // SAFETY: This maintenance image exclusively owns QSPI; acquisition is disabled.
+            let Ok(mut ota) = (unsafe { crate::qspi_slots::ota_receiver() }) else {
+                diagnostic(APP_FAULT, 8);
+                loop {
+                    spin_loop();
+                }
+            };
+            #[cfg(feature = "ble-gatt-ota")]
+            let mut receive = |frame: Option<&[u8]>| {
+                if let Some(frame) = frame {
+                    ota.receive(frame).is_ok()
+                } else {
+                    ota.abort();
+                    true
+                }
+            };
+            #[cfg(feature = "ble-gatt-ota")]
+            let mut app = pin!(fr8029d_bringup::gatt_runner::run_event_driven_ota(
+                backend,
+                &mut resources,
+                identity,
+                |event| report.record(event),
+                &mut receive
+            ));
+            #[cfg(not(feature = "ble-gatt-ota"))]
             let mut app = pin!(run_gatt(backend, &mut resources, identity, |event| {
                 report.record(event);
             }));

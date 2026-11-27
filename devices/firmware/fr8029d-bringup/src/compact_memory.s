@@ -1,4 +1,4 @@
-// Small C and Arm EABI memory routines for the SRAM-resident GATT build.
+// Small C and Arm EABI memory routines for size-constrained GATT builds.
 // r12 retains the original destination. No routine calls out or uses the stack.
 .syntax unified
 .thumb

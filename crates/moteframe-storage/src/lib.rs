@@ -11,6 +11,8 @@
 #![no_std]
 #![forbid(unsafe_code)]
 
+pub mod deferred;
+
 use core::fmt;
 use moteframe_core::ReadAt;
 
@@ -254,3 +256,9 @@ mod tests {
         );
     }
 }
+
+#[cfg(feature = "write")]
+pub mod write;
+
+#[cfg(feature = "config-store")]
+pub mod snapshot;
