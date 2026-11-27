@@ -32,6 +32,7 @@ RUST_FILES = {
     "moteframe-assets": {"src/lib.rs", "src/raster.rs", "src/formats.rs", "tests/raster.rs", "tests/ui.rs"},
     "moteframe-input": {"src/lib.rs", "src/queue.rs", "src/button.rs", "src/touch.rs", "tests/input.rs"},
 }
+PACKAGE_DOCS = {"moteframe-storage": {"storage-config-snapshot.md"}}
 ROOT_FILES = {
     ".gitignore", ".pre-commit-config.yaml", ".typos.toml", ".gitleaks.toml", "CLAUDE.md", "Cargo.toml",
     "Cargo.lock", "Makefile", "rust-toolchain.toml", "deny.toml", "README.md",
@@ -130,7 +131,7 @@ def allowed(relative):
     if len(parts) < 3 or parts[0] != "crates" or parts[1] not in RUST_FILES:
         return False
     tail = Path(*parts[2:]).as_posix()
-    return tail in RUST_FILES[parts[1]] or tail in {"Cargo.toml", "README.md", "LICENSE", "NOTICE"}
+    return tail in RUST_FILES[parts[1]] | PACKAGE_DOCS.get(parts[1], set()) | {"Cargo.toml", "README.md", "LICENSE", "NOTICE"}
 
 
 def validate_files(root):

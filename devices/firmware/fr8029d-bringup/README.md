@@ -407,6 +407,7 @@ SRAM 验收从 FreeRTOS 的 BLE 任务栈预留量减去实测水位，输出 `B
 
 分别用 `ble-gatt-xip` 和 `ble-gatt-freertos,ble-gatt-xip` 构建 Flash 执行版，交给 `gatt_notify_memory.py compare <裸机 ELF> <FreeRTOS ELF>` 比较 Flash 负载和 SRAM 预留。栈用量取自 SRAM 实验的填充值覆盖深度。
 
+Flash 空间紧张时可选 `ble-gatt-xip-compact,ble-gatt-event-driven`；FreeRTOS 再加 `ble-gatt-freertos`。该开关包含 `ble-gatt-xip`，复用 SRAM 镜像已有的紧凑复制、移动和填充例程。原事件驱动 Flash 预算分别为 68 KiB 和 72 KiB。已离线验证配置快照的断电恢复、重叠复制和非对齐访问，无线中断时序仍待实测。[双槽配置预算](../../../crates/moteframe-storage/storage-config-snapshot.md#双槽实现和测试代码的-flash-占用)
 
 实机复测中，手机连接并订阅 `FR29-RTOS` 后带响应写入 `FR29NT75`。J-Link 记录到 Write Response（`0x13`）、带相同 8 字节的 Notify（`0x1B`）和发送完成。手机显示的特征值为 HEX `465232394e543735`。复测期间有一次连接在服务发现时断开，重连后完成验收。实验在 SRAM 中执行，结束后复位回原厂固件。
 
@@ -486,3 +487,19 @@ cargo build --release --locked --offline --target thumbv8m.main-none-eabi \
 每轮结束后均恢复 SDK v0.3.6，再回读完整 1,048,576 字节，与测试前备份逐字节一致。最终 `SR1=0x7C`、`SR2=0x02`，全片 SHA-256 为 `072524958e690a560a70e50ef64ac6d3992aaa8c908ff240d7042cc0d577b5ed`。
 
 本轮全程保持供电。ROM 搬运中途物理断电、重新上电后的续搬和保留区完整性仍待实机验证。维护服务本身没有实现客户端身份认证，部署时应限制进入维护模式的条件。
+
+
+### 双槽配置的 QSPI 后端
+
+紧凑 XIP 裸机和 FreeRTOS 均可选 `qspi-config`。板级代码用 `Partition::new` 提交两个连续、对齐的 4 KiB 配置槽起点、应用允许增长的末地址和所有保留区。产品布局必须覆盖升级暂存、搬运和出厂数据。独占 QSPI0 后通过 `QspiSlots::claim` 校验芯片、控制器、保护状态和当前镜像边界，再用 `open_config` 打开双槽，把返回的存储交给 `DeferredConfig`。复测使用的物理地址只属于离线模型。默认启动路径没有产品配置区地址。
+
+采集停止并获得足够的独占时间后才放行保存。基于 SDK v0.3.6 的页编程和扇区擦除流程，命令轮询在 SRAM 执行。控制器长期繁忙时进入调用方提供的 SRAM 故障处理入口。接入产品前需确定供电故障恢复、XIP 不可用期间的异常向量和最坏擦写时间，并用产品镜像验证 BLE 时序。
+
+在仓库根目录运行离线矩阵，环境需有 `thumbv8m.main-none-eabi` Rust 目标、项目使用的 FreeRTOS 内核源码，以及安装了 `unicorn` 和 `pyelftools` 的 Python。
+
+```sh
+export FREERTOS_KERNEL_DIR=/path/to/FreeRTOS-Kernel
+python3 devices/firmware/fr8029d-bringup/tools/qspi_model/run.py target/fr29-qspi-offline
+```
+
+该命令生成八份 ELF 和 `sizes.json`，在寄存器模型中执行分区、延后保存和连续掉电重试。各镜像的 Flash、静态 RAM 和栈写痕见[存储设计的同口径对照](../../../crates/moteframe-storage/storage-config-snapshot.md#fr8029d-qspi-后端离线对照)。

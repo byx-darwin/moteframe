@@ -27,7 +27,7 @@ class PackageTests(unittest.TestCase):
         for package, test in [("moteframe-storage", "read"), ("moteframe-ble", "values")]:
             files = ["Cargo.toml", "Cargo.lock", "README.md", "LICENSE", "NOTICE", "src/lib.rs", f"tests/{test}.rs", "tests/debug.rs"]
             if package == "moteframe-storage":
-                files.extend(["src/deferred.rs", "src/snapshot.rs", "src/write.rs",
+                files.extend(["storage-config-snapshot.md", "src/deferred.rs", "src/snapshot.rs", "src/write.rs",
                               "tests/deferred.rs", "tests/snapshot.rs"])
             with self.subTest(package=package):
                 self.assertEqual(MODULE.validate_package(package, files), [])

@@ -5,14 +5,14 @@ import subprocess
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from check_boundary import RUST_FILES
+from check_boundary import PACKAGE_DOCS, RUST_FILES
 
 
 def validate_package(package, files):
     """Require the license and attribution notice; reject unreviewed files."""
     if package not in RUST_FILES:
         return ["package is outside portable scope"]
-    required = RUST_FILES[package] | {"Cargo.toml", "README.md", "LICENSE", "NOTICE"}
+    required = RUST_FILES[package] | PACKAGE_DOCS.get(package, set()) | {"Cargo.toml", "README.md", "LICENSE", "NOTICE"}
     permitted = required | {"Cargo.lock", "Cargo.toml.orig", ".cargo_vcs_info.json"}
     errors = []
     for name in files:
