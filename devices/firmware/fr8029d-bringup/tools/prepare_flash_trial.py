@@ -62,6 +62,7 @@ def prepare(original_path, elf_path, package, helper_path):
         app = tcl_words(image[APP_OFFSET:APP_OFFSET + SECTOR_BYTES])
         header = tcl_words(image[:SECTOR_BYTES])
         lines.append(f"set {name} [dict create 0x2000 {app} 0x0 {header}]")
+    lines.append(f"dict set candidate overlay_sha256 {hashes['candidate_overlay_sha256']}")
     # Quote the retained backup path as a literal Tcl string.
     path = str(original_path.resolve())
     quoted = "".join(("\\" + ch) if ch in '\\"$[]' else ch for ch in path)

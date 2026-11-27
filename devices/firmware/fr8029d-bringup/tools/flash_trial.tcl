@@ -170,6 +170,8 @@ proc restore_needed {app header original candidate} {
     if {$header_original && [matches_restore_prefix $app [dict get $candidate 0x2000]]} { return 1 }
     if {[same_words $header [lrepeat 1024 0xffffffff]] &&
         ($app_candidate || [matches_restore_prefix $app $stock_app])} { return 1 }
+    # A completed candidate app precedes every candidate header page.
+    if {$app_candidate && [matches_restore_prefix $header [dict get $candidate 0x0]]} { return 1 }
     # Header restore starts only after the original app has been verified.
     if {$app_original && [matches_restore_prefix $header $stock_header]} { return 1 }
     error "Starting sectors do not match the package or an interrupted restore"
@@ -186,16 +188,27 @@ proc install_pair {original candidate} {
 }
 
 # Hash and decode one immutable byte snapshot for both restore and install rollback.
-proc verified_original {original} {
+proc verified_original {original {install_candidate {}}} {
+    set overlay_args {}
+    if {$install_candidate ne {}} {
+        set overlay_args [list [dict get $install_candidate overlay_sha256] \
+            [dict get $install_candidate 0x0] [dict get $install_candidate 0x2000]]
+    }
     set words [exec python3 -c {
 import hashlib, pathlib, struct, sys
 data = pathlib.Path(sys.argv[1]).read_bytes()
 if len(data) != 1048576:
     sys.exit("Expected a 1 MiB backup")
+if len(sys.argv) > 2:
+    overlay = bytearray(data)
+    for offset, words in zip((0, 8192), sys.argv[3:]):
+        struct.pack_into("<1024I", overlay, offset, *(int(w, 0) for w in words.split()))
+    if hashlib.sha256(overlay).hexdigest() != sys.argv[2]:
+        sys.exit("Candidate overlay SHA-256 mismatch")
 print(*struct.unpack("<8I", hashlib.sha256(data).digest()),
       *struct.unpack_from("<1024I", data, 0),
       *struct.unpack_from("<1024I", data, 8192))
-} [dict get $original backup_file]]
+} [dict get $original backup_file] {*}$overlay_args]
     verify_words "Full backup SHA-256" [lrange $words 0 7] [dict get $original backup_digest]
     foreach {offset begin end} {0x0 8 1031 0x2000 1032 2055} {
         set sector [lrange $words $begin $end]
@@ -219,7 +232,11 @@ proc flash_trial {action original candidate ota helper} {
     set marker [linsert $digest 0 0x3130464d]
     if {[llength $digest] != 8} { error "Invalid backup digest" }
     verify_words "Package backup marker" [lrange [dict get $candidate 0x0] 55 63] $marker
-    set original [verified_original $original]
+    if {$action eq "install"} {
+        set original [verified_original $original $candidate]
+    } else {
+        set original [verified_original $original]
+    }
     if {[word 0xe000ed00] != 0x410fd210} { error "CPU doesn't match the FR8029D board" }
     # Only a completed install rollback may reset on an error.
     set ::rollback_needed 1

@@ -50,6 +50,17 @@ set fixture [model_backup stock]
 dict set stock backup_file [lindex $fixture 0]
 dict set stock backup_digest [lrange $fixture 1 end]
 dict set candidate 0x0 [lreplace [dict get $candidate 0x0] 55 63 0x3130464d {*}[dict get $stock backup_digest]]
+# Independent overlay fixture: both candidate sectors contain 0xcafe words,
+# except for the marker in the first header page.
+dict set candidate overlay_sha256 [exec python3 -c {
+import hashlib, pathlib, struct, sys
+data = bytearray(pathlib.Path(sys.argv[1]).read_bytes())
+marker = b"MF01" + hashlib.sha256(data).digest()
+for offset in (0, 8192):
+    data[offset:offset + 4096] = struct.pack("<I", 0xcafe) * 1024
+data[220:256] = marker
+print(hashlib.sha256(data).hexdigest())
+} [dict get $stock backup_file]]
 proc verify_image {file address format} {
     check {$file eq [dict get $::stock backup_file] && $address == 0x10000000 && $format eq "bin"}
 }
@@ -114,6 +125,7 @@ proc stig {command} {
         0x04000000 { set ::wel 0 }
         0x06000000 {
             check {$::sr1 == 0}
+            incr ::wrens
             set ::wel 2
         }
         0x200a0000 {
@@ -168,6 +180,7 @@ proc start_trial {app header} {
     set ::sectors(8192) $app
     set ::sr1 0x7c
     set ::wel 0
+    set ::wrens 0
     set ::protections {}
     set ::erases {}
     set ::resets 0
@@ -395,5 +408,36 @@ foreach {app header} [list $probe_prefix $stock_header $probe_app $blank] {
             check {[same_words $sectors(8192) $app] && [same_words $sectors(0) $header]}
         }
     }
+}
+# Installation stopped after the first header page, with programmed pages pending.
+set first_page [concat [lrange $probe_header 0 63] [lrepeat 960 0xffffffff]]
+foreach damaged_index {56 32 -1} {
+    set header $first_page
+    if {$damaged_index >= 0} {
+        lset header $damaged_index [expr {[lindex $header $damaged_index] ^ 1}]
+    }
+    start_trial $probe_app $header
+    set sr1 0
+    stig 0x06000000
+    if {$damaged_index >= 0} {
+        check {[catch {trial restore}]}
+        check {$wel == 2 && $erases eq {} && $protections eq {} && $resets == 0}
+        check {[same_words $sectors(8192) $probe_app] && [same_words $sectors(0) $header]}
+    } else {
+        trial restore
+        check {[same_words $sectors(8192) $stock_app] && [same_words $sectors(0) $stock_header]}
+        check {$sr1 == 0x7c && !$wel && $resets == 1}
+    }
+}
+foreach offset {0x2000 0x0} {
+    start_trial $stock_app $stock_header
+    set damaged $candidate
+    set words [dict get $candidate $offset]
+    lset words 32 [expr {[lindex $words 32] ^ 1}]
+    dict set damaged $offset $words
+    check {[catch {flash_trial install $stock $damaged $ota $helper} msg]}
+    check {[string match {*Candidate overlay SHA-256*} $msg]}
+    check {$wrens == 0 && $erases eq {} && $protections eq {} && $resets == 0}
+    check {[same_words $sectors(8192) $stock_app] && [same_words $sectors(0) $stock_header]}
 }
 file delete [dict get $stock backup_file] [dict get $other_stock backup_file]
